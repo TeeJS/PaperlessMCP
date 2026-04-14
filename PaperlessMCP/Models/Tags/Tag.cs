@@ -36,6 +36,9 @@ public record Tag
 
     [JsonPropertyName("owner")]
     public int? Owner { get; init; }
+
+    [JsonPropertyName("parent")]
+    public int? Parent { get; init; }
 }
 
 /// <summary>
@@ -57,6 +60,9 @@ public record TagCreateRequest
 
     [JsonPropertyName("is_inbox_tag")]
     public bool? IsInboxTag { get; init; }
+
+    [JsonPropertyName("parent")]
+    public int? Parent { get; init; }
 }
 
 /// <summary>
@@ -78,6 +84,9 @@ public record TagUpdateRequest
 
     [JsonPropertyName("is_inbox_tag")]
     public bool? IsInboxTag { get; init; }
+
+    [JsonPropertyName("parent")]
+    public int? Parent { get; init; }
 }
 
 /// <summary>

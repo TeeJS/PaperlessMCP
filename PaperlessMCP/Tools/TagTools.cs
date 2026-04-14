@@ -71,7 +71,8 @@ public static class TagTools
         [Description("Hex color (e.g., '#ff0000')")] string? color = null,
         [Description("Match pattern for auto-tagging")] string? match = null,
         [Description("Matching algorithm (0=None, 1=Any, 2=All, 3=Literal, 4=Regex, 5=Fuzzy, 6=Auto)")] int? matchingAlgorithm = null,
-        [Description("Is inbox tag")] bool? isInboxTag = null)
+        [Description("Is inbox tag")] bool? isInboxTag = null,
+        [Description("Parent tag ID for hierarchical tags (optional)")] int? parent = null)
     {
         var request = new TagCreateRequest
         {
@@ -79,7 +80,8 @@ public static class TagTools
             Color = color,
             Match = match,
             MatchingAlgorithm = matchingAlgorithm,
-            IsInboxTag = isInboxTag
+            IsInboxTag = isInboxTag,
+            Parent = parent
         };
 
         var result = await client.CreateTagWithResultAsync(request).ConfigureAwait(false);
@@ -112,7 +114,8 @@ public static class TagTools
         [Description("Hex color (e.g., '#ff0000', optional)")] string? color = null,
         [Description("Match pattern (optional)")] string? match = null,
         [Description("Matching algorithm (optional)")] int? matchingAlgorithm = null,
-        [Description("Is inbox tag (optional)")] bool? isInboxTag = null)
+        [Description("Is inbox tag (optional)")] bool? isInboxTag = null,
+        [Description("Parent tag ID for hierarchical tags (optional)")] int? parent = null)
     {
         var request = new TagUpdateRequest
         {
@@ -120,7 +123,8 @@ public static class TagTools
             Color = color,
             Match = match,
             MatchingAlgorithm = matchingAlgorithm,
-            IsInboxTag = isInboxTag
+            IsInboxTag = isInboxTag,
+            Parent = parent
         };
 
         var tag = await client.UpdateTagAsync(id, request).ConfigureAwait(false);
