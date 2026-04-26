@@ -397,16 +397,26 @@ public class PaperlessClient
         object? parameters = null,
         CancellationToken cancellationToken = default)
     {
-        var request = new
+        // Build the body via JsonObject so the inner `parameters` payload serializes
+        // against its runtime type. If we wrap in an anonymous type with `parameters`
+        // typed as `object?`, System.Text.Json emits `"parameters":{}` and Paperless
+        // rejects the request (e.g. add_tag without a tag id).
+        var rootNode = new System.Text.Json.Nodes.JsonObject
         {
-            documents = documentIds,
-            method,
-            parameters
+            ["documents"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(documentIds, JsonOptions)),
+            ["method"] = method,
         };
+        if (parameters != null)
+        {
+            rootNode["parameters"] = System.Text.Json.Nodes.JsonNode.Parse(
+                JsonSerializer.Serialize(parameters, parameters.GetType(), JsonOptions));
+        }
+        var jsonString = rootNode.ToJsonString(JsonOptions);
+        var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/documents/bulk_edit/", request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -634,17 +644,26 @@ public class PaperlessClient
         object? parameters = null,
         CancellationToken cancellationToken = default)
     {
-        var request = new
+        // Same fix as BulkEditDocumentsAsync — wrapping `parameters` in an anonymous
+        // type means its compile-time type is `object?` and the inner payload becomes
+        // `{}`.
+        var rootNode = new System.Text.Json.Nodes.JsonObject
         {
-            objects = objectIds,
-            object_type = objectType,
-            operation,
-            parameters
+            ["objects"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(objectIds, JsonOptions)),
+            ["object_type"] = objectType,
+            ["operation"] = operation,
         };
+        if (parameters != null)
+        {
+            rootNode["parameters"] = System.Text.Json.Nodes.JsonNode.Parse(
+                JsonSerializer.Serialize(parameters, parameters.GetType(), JsonOptions));
+        }
+        var jsonString = rootNode.ToJsonString(JsonOptions);
+        var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/bulk_edit_objects/", request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -683,7 +702,15 @@ public class PaperlessClient
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(url, request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            // Serialize against the runtime type explicitly. Empirically, posting via
+            // PostAsJsonAsync(...) or PatchAsync(JsonContent.Create(...)) on this client
+            // (with the configured DelegatingHandler + Polly retry pipeline) sent an
+            // empty body to Paperless even though the JsonContent's own
+            // ReadAsStringAsync returned the expected JSON. Materializing the body into
+            // a StringContent up front sidesteps that.
+            var jsonString = JsonSerializer.Serialize(request, request.GetType(), JsonOptions);
+            var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(url, content, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {
@@ -707,7 +734,12 @@ public class PaperlessClient
     {
         try
         {
-            var content = JsonContent.Create(request, options: JsonOptions);
+            // Same as PostWithResultAsync — explicit runtime-type serialization into
+            // StringContent. With JsonContent.Create(...) here the body reached
+            // Paperless empty (PATCH `{}` is a valid no-op so the row's modified
+            // timestamp updated but no fields actually changed).
+            var jsonString = JsonSerializer.Serialize(request, request.GetType(), JsonOptions);
+            var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
             var response = await _httpClient.PatchAsync(url, content, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
