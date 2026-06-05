@@ -301,9 +301,14 @@ Environment variables. That's it. No config files to manage.
 | `PAPERLESS_BASE_URL` | Yes | — | Your Paperless-ngx URL |
 | `PAPERLESS_API_TOKEN` | Yes | — | API token for authentication |
 | `MCP_PORT` | | `5000` | Port for HTTP/SSE mode |
+| `MCP_RELAX_ACCEPT_HEADER` | | `false` | Normalize `/mcp` POST `Accept` headers for clients that cannot send both Streamable HTTP media types |
 | `MAX_PAGE_SIZE` | | `100` | Max items per paginated request |
 
 Aliases supported: `PAPERLESS_URL` and `PAPERLESS_TOKEN` also work if that's your style.
+
+### LocalAI Compatibility
+
+Streamable HTTP clients are expected to send `Accept: application/json, text/event-stream` on `/mcp` POST requests. Some clients cannot configure that header. Set `MCP_RELAX_ACCEPT_HEADER=true` to have PaperlessMCP normalize missing or incomplete `Accept` headers before the MCP SDK handles the request.
 
 ---
 

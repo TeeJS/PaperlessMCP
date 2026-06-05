@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using PaperlessMCP.Client;
 using PaperlessMCP.Configuration;
+using PaperlessMCP.Utils;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -50,6 +51,23 @@ else
 
     var port = app.Configuration.GetValue<int?>("Mcp:Port")
                ?? (Environment.GetEnvironmentVariable("MCP_PORT") is string portStr && int.TryParse(portStr, out var p) ? p : 5000);
+    var relaxAcceptHeader = GetBool(app.Configuration, "Mcp:RelaxAcceptHeader", "MCP_RELAX_ACCEPT_HEADER", defaultValue: false);
+
+    if (relaxAcceptHeader)
+    {
+        app.Use(async (context, next) =>
+        {
+            if (HttpMethods.IsPost(context.Request.Method) &&
+                context.Request.Path.StartsWithSegments("/mcp") &&
+                McpAcceptHeaderCompatibility.EnsureStreamableHttpAcceptHeader(context.Request))
+            {
+                app.Logger.LogDebug(
+                    "Normalized MCP Accept header for compatibility with clients that cannot send both required media types.");
+            }
+
+            await next().ConfigureAwait(false);
+        });
+    }
 
     app.MapMcp("/mcp");
 
@@ -57,6 +75,12 @@ else
     app.Logger.LogInformation("MCP endpoint available at: http://localhost:{Port}/mcp", port);
 
     await app.RunAsync($"http://0.0.0.0:{port}");
+}
+
+bool GetBool(IConfiguration configuration, string key, string environmentVariable, bool defaultValue)
+{
+    var value = Environment.GetEnvironmentVariable(environmentVariable) ?? configuration.GetValue<string>(key);
+    return bool.TryParse(value, out var parsed) ? parsed : defaultValue;
 }
 
 void ConfigureServices(IServiceCollection services, IConfiguration configuration)
