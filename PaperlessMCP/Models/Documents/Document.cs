@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PaperlessMCP.Models.Documents;
@@ -86,7 +87,48 @@ public record DocumentNote
     public DateTime Created { get; init; }
 
     [JsonPropertyName("user")]
+    [JsonConverter(typeof(FlexibleUserIdConverter))]
     public int? User { get; init; }
+}
+
+/// <summary>
+/// Reads a "user" field that Paperless-ngx may serialize either as a bare user
+/// id (older API) or as an expanded user object {"id": N, ...} (Paperless 2.x).
+/// In both cases the user id is returned; anything else yields null. This keeps
+/// the model tolerant of API version drift instead of failing the whole
+/// deserialization (which the client would otherwise swallow into an empty result).
+/// </summary>
+public class FlexibleUserIdConverter : JsonConverter<int?>
+{
+    public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Null:
+                return null;
+            case JsonTokenType.Number:
+                return reader.GetInt32();
+            case JsonTokenType.StartObject:
+                using (var doc = JsonDocument.ParseValue(ref reader))
+                {
+                    return doc.RootElement.TryGetProperty("id", out var idProp)
+                           && idProp.TryGetInt32(out var id)
+                        ? id
+                        : null;
+                }
+            default:
+                reader.Skip();
+                return null;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
+    {
+        if (value.HasValue)
+            writer.WriteNumberValue(value.Value);
+        else
+            writer.WriteNullValue();
+    }
 }
 
 /// <summary>
