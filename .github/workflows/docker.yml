@@ -30,6 +30,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Resolve a valid .NET semver for the image build-arg / OCI version label.
+      # metadata-action's version output is "latest" on the default branch, which
+      # dotnet rejects, so derive it explicitly: the tag for v* builds, else version.json.
+      - name: Resolve build version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(jq -r .version version.json)" >> "$GITHUB_OUTPUT"
+          fi
+
       # Generate image tags/labels from git context:
       #   - semver tags  (1.2.3, 1.2) when a v* tag is pushed
       #   - latest       on the default branch
@@ -71,6 +83,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
