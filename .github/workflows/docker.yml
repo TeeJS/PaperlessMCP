@@ -72,17 +72,43 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          # The Dockerfile lives in PaperlessMCP/ and COPYs relative to that directory,
-          # so the build context must be PaperlessMCP/ (matches the existing Kaniko build).
-          context: ./PaperlessMCP
-          file: ./PaperlessMCP/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.value }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # mcr.microsoft.com intermittently rate-limits anonymous base-image pulls from
+      # GitHub's shared runner IPs (HTTP 401/429), which otherwise fails the whole build.
+      # Retry the buildx invocation with backoff so a transient burst self-heals. Raw
+      # `docker buildx build` (instead of build-push-action) keeps the retry loop
+      # first-party and dependency-free; the trade-off is dropping the gha layer cache,
+      # which is cheap here since the build is short. Context is ./PaperlessMCP because
+      # the Dockerfile COPYs relative to that directory.
+      - name: Build and push (with retry for transient registry rate limits)
+        shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          LABELS: ${{ steps.meta.outputs.labels }}
+          VERSION: ${{ steps.version.outputs.value }}
+          PUSH: ${{ github.event_name != 'pull_request' }}
+        run: |
+          args=()
+          while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
+          while IFS= read -r l; do [ -n "$l" ] && args+=(--label "$l"); done <<< "$LABELS"
+          [ "$PUSH" = "true" ] && args+=(--push)
+
+          for attempt in 1 2 3 4; do
+            echo "::group::docker buildx build (attempt $attempt)"
+            if docker buildx build \
+                 --file ./PaperlessMCP/Dockerfile \
+                 --build-arg "VERSION=$VERSION" \
+                 "${args[@]}" \
+                 ./PaperlessMCP; then
+              echo "::endgroup::"
+              echo "build succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -lt 4 ]; then
+              delay=$((attempt * 60))
+              echo "attempt $attempt failed (transient registry error?); retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          echo "build failed after 4 attempts"
+          exit 1
