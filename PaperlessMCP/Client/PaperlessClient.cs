@@ -562,6 +562,64 @@ public class PaperlessClient
 
     #endregion
 
+    #region Name resolution
+
+    /// <summary>
+    /// Returns every tag whose name matches <paramref name="name"/> case-insensitively.
+    /// Lookup-only (never creates). All exact matches are returned so the caller can
+    /// distinguish unknown (0), resolved (1), and ambiguous (&gt;1).
+    /// </summary>
+    public Task<List<Tag>> FindTagsByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        FindByNameAsync(name, GetTagsAsync, t => t.Name, cancellationToken);
+
+    /// <summary>
+    /// Returns every document type whose name matches <paramref name="name"/> case-insensitively.
+    /// Lookup-only; see <see cref="FindTagsByNameAsync"/> for match semantics.
+    /// </summary>
+    public Task<List<DocumentType>> FindDocumentTypesByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        FindByNameAsync(name, GetDocumentTypesAsync, t => t.Name, cancellationToken);
+
+    /// <summary>
+    /// Returns every correspondent whose name matches <paramref name="name"/> case-insensitively.
+    /// Lookup-only; see <see cref="FindTagsByNameAsync"/> for match semantics.
+    /// </summary>
+    public Task<List<Correspondent>> FindCorrespondentsByNameAsync(string name, CancellationToken cancellationToken = default) =>
+        FindByNameAsync(name, GetCorrespondentsAsync, c => c.Name, cancellationToken);
+
+    /// <summary>
+    /// Pages through every result of <paramref name="fetchPage"/> and collects items whose
+    /// projected name equals <paramref name="name"/> (ordinal, case-insensitive).
+    /// </summary>
+    private async Task<List<T>> FindByNameAsync<T>(
+        string name,
+        Func<int, int?, string?, CancellationToken, Task<PaginatedResult<T>>> fetchPage,
+        Func<T, string> nameSelector,
+        CancellationToken cancellationToken)
+    {
+        var matches = new List<T>();
+        if (string.IsNullOrWhiteSpace(name))
+            return matches;
+
+        var page = 1;
+        while (true)
+        {
+            var result = await fetchPage(page, _options.MaxPageSize, null, cancellationToken).ConfigureAwait(false);
+            if (result.Results.Count == 0)
+                break;
+
+            matches.AddRange(result.Results.Where(item =>
+                string.Equals(nameSelector(item), name, StringComparison.OrdinalIgnoreCase)));
+
+            if (string.IsNullOrEmpty(result.Next))
+                break;
+            page++;
+        }
+
+        return matches;
+    }
+
+    #endregion
+
     #region Storage Paths
 
     public async Task<PaginatedResult<StoragePath>> GetStoragePathsAsync(int page = 1, int? pageSize = null, string? ordering = null, CancellationToken cancellationToken = default)
