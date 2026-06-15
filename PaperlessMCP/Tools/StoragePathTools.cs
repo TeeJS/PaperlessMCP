@@ -63,8 +63,8 @@ public static class StoragePathTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_storage_paths_create")]
-    [Description("Create a new storage path.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): entity creation is
+    // not exposed. Method retained; re-add [McpServerTool]/[Description] to restore.
     public static async Task<string> Create(
         PaperlessClient client,
         [Description("Storage path name")] string name,

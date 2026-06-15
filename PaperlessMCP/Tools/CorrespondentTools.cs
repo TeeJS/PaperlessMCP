@@ -63,8 +63,8 @@ public static class CorrespondentTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_correspondents_create")]
-    [Description("Create a new correspondent.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): entity creation is
+    // not exposed. Method retained; re-add [McpServerTool]/[Description] to restore.
     public static async Task<string> Create(
         PaperlessClient client,
         [Description("Correspondent name")] string name,

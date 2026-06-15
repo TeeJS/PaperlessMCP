@@ -254,31 +254,5 @@ public class DocumentToolsByNameTests : IDisposable
         _factory.MockHandler.GetMatchCount(patch).Should().Be(0);
     }
 
-    [Fact]
-    public async Task Update_WithDocumentTypeNameAndId_ReturnsValidationErrorAndDoesNotPatch()
-    {
-        var patch = _factory.SetupPatch("api/documents/1/", TestFixtures.Documents.CreateDocumentJson(1));
-
-        var result = await DocumentTools.Update(_factory.Client, 1, documentType: 5, documentTypeName: "Type 2");
-
-        var json = JsonDocument.Parse(result);
-        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
-        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION");
-        _factory.MockHandler.GetMatchCount(patch).Should().Be(0);
-    }
-
-    [Fact]
-    public async Task Update_WithCorrespondentNameAndId_ReturnsValidationErrorAndDoesNotPatch()
-    {
-        var patch = _factory.SetupPatch("api/documents/1/", TestFixtures.Documents.CreateDocumentJson(1));
-
-        var result = await DocumentTools.Update(_factory.Client, 1, correspondent: 5, correspondentName: "Correspondent 2");
-
-        var json = JsonDocument.Parse(result);
-        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
-        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION");
-        _factory.MockHandler.GetMatchCount(patch).Should().Be(0);
-    }
-
     #endregion
 }

@@ -63,8 +63,8 @@ public static class TagTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_tags_create")]
-    [Description("Create a new tag.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): entity creation is
+    // not exposed. Method retained; re-add [McpServerTool]/[Description] to restore.
     public static async Task<string> Create(
         PaperlessClient client,
         [Description("Tag name")] string name,
