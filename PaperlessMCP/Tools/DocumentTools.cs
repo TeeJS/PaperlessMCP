@@ -337,13 +337,49 @@ public static class DocumentTools
         [Description("Storage path ID (optional, use -1 to clear)")] int? storagePath = null,
         [Description("Tag IDs to set (comma-separated, optional)")] string? tags = null,
         [Description("Archive serial number (optional)")] int? archiveSerialNumber = null,
-        [Description("Created date (YYYY-MM-DD, optional)")] string? created = null)
+        [Description("Created date (YYYY-MM-DD, optional)")] string? created = null,
+        [Description("Document type by NAME (optional; exact, case-insensitive; resolved server-side; never creates). Mutually exclusive with documentType.")] string? documentTypeName = null,
+        [Description("Correspondent by NAME (optional; exact, case-insensitive; resolved server-side; never creates). Mutually exclusive with correspondent.")] string? correspondentName = null)
     {
+        string ValidationError(string message, object? details = null) =>
+            JsonSerializer.Serialize(McpErrorResponse.Create(
+                ErrorCodes.Validation, message, details,
+                new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
+
+        // Resolve name-based document type / correspondent up front; any failure aborts before writing.
+        var resolvedDocumentType = documentType;
+        if (documentTypeName != null)
+        {
+            if (documentType != null)
+                return ValidationError("Provide either documentType (id) or documentTypeName, not both.");
+
+            var matches = await client.FindDocumentTypesByNameAsync(documentTypeName).ConfigureAwait(false);
+            if (matches.Count == 0)
+                return ValidationError($"Unknown document type '{documentTypeName}'; no changes were made.");
+            if (matches.Count > 1)
+                return ValidationError($"Ambiguous document type '{documentTypeName}' (multiple matches); no changes were made.");
+            resolvedDocumentType = matches[0].Id;
+        }
+
+        var resolvedCorrespondent = correspondent;
+        if (correspondentName != null)
+        {
+            if (correspondent != null)
+                return ValidationError("Provide either correspondent (id) or correspondentName, not both.");
+
+            var matches = await client.FindCorrespondentsByNameAsync(correspondentName).ConfigureAwait(false);
+            if (matches.Count == 0)
+                return ValidationError($"Unknown correspondent '{correspondentName}'; no changes were made.");
+            if (matches.Count > 1)
+                return ValidationError($"Ambiguous correspondent '{correspondentName}' (multiple matches); no changes were made.");
+            resolvedCorrespondent = matches[0].Id;
+        }
+
         var request = new DocumentUpdateRequest
         {
             Title = title,
-            Correspondent = correspondent == -1 ? null : correspondent,
-            DocumentType = documentType == -1 ? null : documentType,
+            Correspondent = resolvedCorrespondent == -1 ? null : resolvedCorrespondent,
+            DocumentType = resolvedDocumentType == -1 ? null : resolvedDocumentType,
             StoragePath = storagePath == -1 ? null : storagePath,
             Tags = ParseIntArray(tags)?.ToList(),
             ArchiveSerialNumber = archiveSerialNumber,
@@ -369,6 +405,127 @@ public static class DocumentTools
             new McpMeta { PaperlessBaseUrl = client.BaseUrl }
         );
         return JsonSerializer.Serialize(response);
+    }
+
+    [McpServerTool(Name = "paperless_documents_add_tags_by_name")]
+    [Description("Add one or more tags to a document by tag NAME (comma-separated), resolving names to IDs server-side. Existing tags are preserved; adding a tag the document already has is a no-op. Never creates tags — unknown or ambiguous names fail without changing anything.")]
+    public static Task<string> AddTagsByName(
+        PaperlessClient client,
+        [Description("Document ID")] int id,
+        [Description("Tag names to add (comma-separated, case-insensitive)")] string names)
+        => ModifyTagsByName(client, id, names, add: true);
+
+    [McpServerTool(Name = "paperless_documents_remove_tags_by_name")]
+    [Description("Remove one or more tags from a document by tag NAME (comma-separated), resolving names to IDs server-side. Other tags are preserved; removing a tag the document doesn't have is a no-op. Never creates tags — unknown or ambiguous names fail without changing anything.")]
+    public static Task<string> RemoveTagsByName(
+        PaperlessClient client,
+        [Description("Document ID")] int id,
+        [Description("Tag names to remove (comma-separated, case-insensitive)")] string names)
+        => ModifyTagsByName(client, id, names, add: false);
+
+    /// <summary>
+    /// Shared implementation for add/remove tags-by-name. Resolves every requested name to a
+    /// tag id up front (atomic): if any name is unknown or ambiguous, nothing is written and an
+    /// error listing the offending names is returned. Otherwise the resolved ids are unioned with
+    /// (add) or subtracted from (remove) the document's current tags; the PATCH is skipped when the
+    /// set is unchanged (idempotent). The resulting tag set is echoed back as {id, name} pairs.
+    /// </summary>
+    private static async Task<string> ModifyTagsByName(PaperlessClient client, int id, string names, bool add)
+    {
+        var requested = (names ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (requested.Length == 0)
+        {
+            return JsonSerializer.Serialize(McpErrorResponse.Create(
+                ErrorCodes.Validation,
+                "No tag names provided. Pass a comma-separated list of tag names.",
+                meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
+        }
+
+        // Resolve every requested name first so the operation is all-or-nothing.
+        var resolvedIds = new HashSet<int>();
+        var unknown = new List<string>();
+        var ambiguous = new List<string>();
+        foreach (var name in requested)
+        {
+            var matches = await client.FindTagsByNameAsync(name).ConfigureAwait(false);
+            if (matches.Count == 0) unknown.Add(name);
+            else if (matches.Count > 1) ambiguous.Add(name);
+            else resolvedIds.Add(matches[0].Id);
+        }
+
+        if (unknown.Count > 0 || ambiguous.Count > 0)
+        {
+            return JsonSerializer.Serialize(McpErrorResponse.Create(
+                ErrorCodes.Validation,
+                "One or more tag names could not be resolved; no changes were made.",
+                new { unknown_tags = unknown, ambiguous_tags = ambiguous },
+                new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
+        }
+
+        var document = await client.GetDocumentAsync(id).ConfigureAwait(false);
+        if (document == null)
+        {
+            return JsonSerializer.Serialize(McpErrorResponse.Create(
+                ErrorCodes.NotFound,
+                $"Document with ID {id} not found",
+                meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
+        }
+
+        var current = new HashSet<int>(document.Tags);
+        var updated = new HashSet<int>(current);
+        if (add) updated.UnionWith(resolvedIds);
+        else updated.ExceptWith(resolvedIds);
+
+        // Idempotent: only PATCH when the tag set actually changes.
+        if (!updated.SetEquals(current))
+        {
+            var request = new DocumentUpdateRequest { Tags = updated.OrderBy(t => t).ToList() };
+            var result = await client.UpdateDocumentWithResultAsync(id, request).ConfigureAwait(false);
+
+            if (!result.IsSuccess)
+            {
+                var error = result.Error!;
+                return JsonSerializer.Serialize(McpErrorResponse.Create(
+                    error.StatusCode == System.Net.HttpStatusCode.NotFound ? ErrorCodes.NotFound : ErrorCodes.UpstreamError,
+                    $"Failed to update document {id}: {error.Message}",
+                    new { status_code = (int)error.StatusCode, response_body = error.ResponseBody },
+                    new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
+            }
+
+            // Trust the server's echoed tag set for the response.
+            updated = new HashSet<int>(result.Value!.Tags);
+        }
+
+        var nameMap = await LoadTagNameMap(client).ConfigureAwait(false);
+        var tags = updated
+            .OrderBy(tagId => tagId)
+            .Select(tagId => new { id = tagId, name = nameMap.TryGetValue(tagId, out var n) ? n : null })
+            .ToList();
+
+        var response = McpResponse<object>.Success(
+            new { document_id = id, tags },
+            new McpMeta { PaperlessBaseUrl = client.BaseUrl });
+        return JsonSerializer.Serialize(response);
+    }
+
+    /// <summary>
+    /// Pages through all tags and builds an id → name map for echoing a document's resulting tag set.
+    /// </summary>
+    private static async Task<Dictionary<int, string>> LoadTagNameMap(PaperlessClient client)
+    {
+        var map = new Dictionary<int, string>();
+        var page = 1;
+        while (true)
+        {
+            var result = await client.GetTagsAsync(page).ConfigureAwait(false);
+            if (result.Results.Count == 0) break;
+            foreach (var tag in result.Results) map[tag.Id] = tag.Name;
+            if (string.IsNullOrEmpty(result.Next)) break;
+            page++;
+        }
+        return map;
     }
 
     [McpServerTool(Name = "paperless_documents_delete")]
