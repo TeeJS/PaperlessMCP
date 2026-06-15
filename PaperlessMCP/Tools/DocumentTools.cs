@@ -86,7 +86,9 @@ public static class DocumentTools
     [Description("Get a document by its ID.")]
     public static async Task<string> Get(
         PaperlessClient client,
-        [Description("Document ID")] int id)
+        [Description("Document ID")] int id,
+        [Description("Include the document's notes (default: false). Notes can be very large and are not needed for filing/triage.")] bool includeNotes = false,
+        [Description("Max characters of OCR content to return (default: 0 = unlimited).")] int contentMaxLength = 0)
     {
         var document = await client.GetDocumentAsync(id).ConfigureAwait(false);
 
@@ -99,6 +101,16 @@ public static class DocumentTools
             );
             return JsonSerializer.Serialize(errorResponse);
         }
+
+        // Trim oversized fields: notes are often enormous and never needed for
+        // triage/filing; content can be capped on request. Both default to lean.
+        document = document with
+        {
+            Notes = includeNotes ? document.Notes : null,
+            Content = (contentMaxLength > 0 && document.Content.Length > contentMaxLength)
+                ? document.Content[..contentMaxLength] + "..."
+                : document.Content,
+        };
 
         var response = McpResponse<Document>.Success(
             document,
