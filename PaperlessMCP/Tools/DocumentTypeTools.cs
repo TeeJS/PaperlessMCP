@@ -63,8 +63,8 @@ public static class DocumentTypeTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_document_types_create")]
-    [Description("Create a new document type.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): entity creation is
+    // not exposed. Method retained; re-add [McpServerTool]/[Description] to restore.
     public static async Task<string> Create(
         PaperlessClient client,
         [Description("Document type name")] string name,

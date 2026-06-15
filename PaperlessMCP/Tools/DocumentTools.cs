@@ -339,19 +339,13 @@ public static class DocumentTools
     }
 
     [McpServerTool(Name = "paperless_documents_update")]
-    [Description("Update document metadata (title, correspondent, type, tags, etc.).")]
+    [Description("Update document metadata: title, plus document type and correspondent by NAME (resolved server-side; never creates). Tags are managed through the add/remove tags-by-name tools. There is no raw-ID write path.")]
     public static async Task<string> Update(
         PaperlessClient client,
         [Description("Document ID")] int id,
         [Description("New title (optional)")] string? title = null,
-        [Description("Correspondent ID (optional, use -1 to clear)")] int? correspondent = null,
-        [Description("Document type ID (optional, use -1 to clear)")] int? documentType = null,
-        [Description("Storage path ID (optional, use -1 to clear)")] int? storagePath = null,
-        [Description("Tag IDs to set (comma-separated, optional)")] string? tags = null,
-        [Description("Archive serial number (optional)")] int? archiveSerialNumber = null,
-        [Description("Created date (YYYY-MM-DD, optional)")] string? created = null,
-        [Description("Document type by NAME (optional; exact, case-insensitive; resolved server-side; never creates). Mutually exclusive with documentType.")] string? documentTypeName = null,
-        [Description("Correspondent by NAME (optional; exact, case-insensitive; resolved server-side; never creates). Mutually exclusive with correspondent.")] string? correspondentName = null)
+        [Description("Document type by NAME (optional; exact, case-insensitive; resolved server-side; never creates)")] string? documentTypeName = null,
+        [Description("Correspondent by NAME (optional; exact, case-insensitive; resolved server-side; never creates)")] string? correspondentName = null)
     {
         string ValidationError(string message, object? details = null) =>
             JsonSerializer.Serialize(McpErrorResponse.Create(
@@ -359,12 +353,9 @@ public static class DocumentTools
                 new McpMeta { PaperlessBaseUrl = client.BaseUrl }));
 
         // Resolve name-based document type / correspondent up front; any failure aborts before writing.
-        var resolvedDocumentType = documentType;
+        int? resolvedDocumentType = null;
         if (documentTypeName != null)
         {
-            if (documentType != null)
-                return ValidationError("Provide either documentType (id) or documentTypeName, not both.");
-
             var matches = await client.FindDocumentTypesByNameAsync(documentTypeName).ConfigureAwait(false);
             if (matches.Count == 0)
                 return ValidationError($"Unknown document type '{documentTypeName}'; no changes were made.");
@@ -373,12 +364,9 @@ public static class DocumentTools
             resolvedDocumentType = matches[0].Id;
         }
 
-        var resolvedCorrespondent = correspondent;
+        int? resolvedCorrespondent = null;
         if (correspondentName != null)
         {
-            if (correspondent != null)
-                return ValidationError("Provide either correspondent (id) or correspondentName, not both.");
-
             var matches = await client.FindCorrespondentsByNameAsync(correspondentName).ConfigureAwait(false);
             if (matches.Count == 0)
                 return ValidationError($"Unknown correspondent '{correspondentName}'; no changes were made.");
@@ -387,15 +375,13 @@ public static class DocumentTools
             resolvedCorrespondent = matches[0].Id;
         }
 
+        // Only name-resolved type/correspondent and title are written; unset fields are omitted
+        // (left unchanged). No raw IDs, tags, storage path, ASN, or date are settable here.
         var request = new DocumentUpdateRequest
         {
             Title = title,
-            Correspondent = resolvedCorrespondent == -1 ? null : resolvedCorrespondent,
-            DocumentType = resolvedDocumentType == -1 ? null : resolvedDocumentType,
-            StoragePath = storagePath == -1 ? null : storagePath,
-            Tags = ParseIntArray(tags)?.ToList(),
-            ArchiveSerialNumber = archiveSerialNumber,
-            Created = ParseDate(created)
+            Correspondent = resolvedCorrespondent,
+            DocumentType = resolvedDocumentType
         };
 
         var result = await client.UpdateDocumentWithResultAsync(id, request).ConfigureAwait(false);
@@ -596,8 +582,9 @@ public static class DocumentTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_documents_bulk_update")]
-    [Description("Perform bulk operations on multiple documents. Supports dry run mode.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): bulk operations
+    // (set-by-ID, delete, reprocess across many docs) are not exposed. Method retained so
+    // the capability can be restored by re-adding the [McpServerTool]/[Description] attributes.
     public static async Task<string> BulkUpdate(
         PaperlessClient client,
         [Description("Document IDs (comma-separated)")] string documentIds,
@@ -682,8 +669,8 @@ public static class DocumentTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_documents_reprocess")]
-    [Description("Reprocess a document's OCR and content extraction.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown). Method retained;
+    // re-add the [McpServerTool]/[Description] attributes to restore.
     public static async Task<string> Reprocess(
         PaperlessClient client,
         [Description("Document ID")] int id,

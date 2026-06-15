@@ -62,8 +62,8 @@ public static class CustomFieldTools
         return JsonSerializer.Serialize(response);
     }
 
-    [McpServerTool(Name = "paperless_custom_fields_create")]
-    [Description("Create a new custom field definition.")]
+    // Unregistered from the MCP tool surface (triage-safe lockdown): entity creation is
+    // not exposed. Method retained; re-add [McpServerTool]/[Description] to restore.
     public static async Task<string> Create(
         PaperlessClient client,
         [Description("Custom field name")] string name,
