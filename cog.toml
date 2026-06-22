@@ -10,16 +10,13 @@ ignore_merge_commits = true
 disable_changelog = false
 disable_bump_commit = false
 
-# Pre-bump hooks run before the version is bumped
+# NOTE: cog is used here ONLY for commit-message validation (the commit-msg
+# hook below + the pr.yml commitlint step). `cog bump` is NOT part of the
+# release flow — releases are driven entirely by .woodpecker/release.yml, which
+# derives the version from git tags and conventional commits. Bump hooks are
+# intentionally empty so nothing here implies cog performs releases.
 pre_bump_hooks = []
-
-# Post-bump hooks run after version bump but before commit
-# Updates the Version element in the .csproj file
-# Uses perl for cross-platform compatibility (macOS sed differs from GNU sed)
-# Regex anchors to line start to avoid replacing PackageReference versions
-post_bump_hooks = [
-    "perl -i -pe 's/^(\\s*)<Version>.*<\\/Version>/$1<Version>{{version}}<\\/Version>/' PaperlessMCP/PaperlessMCP.csproj",
-]
+post_bump_hooks = []
 
 # Git hooks configuration
 # Validates commit messages follow conventional commit format
