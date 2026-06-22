@@ -102,6 +102,10 @@ void ConfigureServices(IServiceCollection services, IConfiguration configuration
         options.MaxPageSize = Environment.GetEnvironmentVariable("MAX_PAGE_SIZE") is string maxPageStr && int.TryParse(maxPageStr, out var maxPage)
             ? maxPage
             : configuration.GetValue<int?>("Paperless:MaxPageSize") ?? 100;
+
+        options.HttpTimeoutSeconds = ParsingHelpers.ParsePositiveInt(
+            Environment.GetEnvironmentVariable("HTTP_TIMEOUT_SECONDS"),
+            configuration.GetValue<int?>("Paperless:HttpTimeoutSeconds") ?? 30);
     });
 
     // Configure retry policy for transient errors
@@ -116,7 +120,7 @@ void ConfigureServices(IServiceCollection services, IConfiguration configuration
         var options = sp.GetRequiredService<IOptions<PaperlessOptions>>().Value;
         client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
         client.DefaultRequestHeaders.Add("Accept", "application/json; version=9");
-        client.Timeout = TimeSpan.FromSeconds(30);
+        client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
     })
     .AddHttpMessageHandler<PaperlessAuthHandler>()
     .AddPolicyHandler(retryPolicy);

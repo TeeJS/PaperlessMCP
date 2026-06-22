@@ -332,6 +332,7 @@ Environment variables. That's it. No config files to manage.
 | `MCP_PORT` | | `5000` | Port for Streamable HTTP mode |
 | `MCP_RELAX_ACCEPT_HEADER` | | `false` | Normalize `/mcp` POST `Accept` headers for clients that cannot send both Streamable HTTP media types |
 | `MAX_PAGE_SIZE` | | `100` | Max items per paginated request |
+| `HTTP_TIMEOUT_SECONDS` | | `30` | Timeout for requests to Paperless-ngx. Raise it if large full-text searches time out |
 
 Aliases supported: `PAPERLESS_URL` and `PAPERLESS_TOKEN` also work if that's your style.
 
