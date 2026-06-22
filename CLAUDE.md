@@ -51,6 +51,7 @@ Environment variables (take precedence over appsettings.json):
 - `PAPERLESS_API_TOKEN` / `PAPERLESS_TOKEN` - API authentication token
 - `MAX_PAGE_SIZE` - Max items per page (default: 100)
 - `MCP_PORT` - HTTP server port (default: 5000)
+- `HTTP_TIMEOUT_SECONDS` - Timeout for Paperless API requests (default: 30)
 
 ### Testing
 

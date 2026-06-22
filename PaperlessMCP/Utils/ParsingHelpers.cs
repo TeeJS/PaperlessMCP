@@ -34,4 +34,16 @@ public static class ParsingHelpers
 
         return DateTime.TryParse(input, out var date) ? date : null;
     }
+
+    /// <summary>
+    /// Parses a string into a positive integer, returning a fallback for
+    /// missing, malformed, zero, or negative values.
+    /// </summary>
+    /// <param name="input">Raw string value (e.g., from an environment variable)</param>
+    /// <param name="fallback">Value returned when input is not a positive integer</param>
+    /// <returns>The parsed positive integer, or <paramref name="fallback"/></returns>
+    public static int ParsePositiveInt(string? input, int fallback)
+    {
+        return int.TryParse(input, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
 }
