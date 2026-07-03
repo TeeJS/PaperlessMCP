@@ -21,12 +21,27 @@ public record CustomField
 }
 
 /// <summary>
+/// A single option in a select-type custom field.
+///
+/// Paperless-ngx v2.14+ requires each option serialised as
+/// {"label": "..."} rather than a bare string. The old bare-string
+/// form makes paperless's serialisers.py raise
+/// "'str' object has no attribute 'get'", surfaced as a generic
+/// UPSTREAM_ERROR / 400 through this MCP.
+/// </summary>
+public record SelectOption
+{
+    [JsonPropertyName("label")]
+    public required string Label { get; init; }
+}
+
+/// <summary>
 /// Extra data for select-type custom fields.
 /// </summary>
 public record CustomFieldExtraData
 {
     [JsonPropertyName("select_options")]
-    public List<string>? SelectOptions { get; init; }
+    public List<SelectOption>? SelectOptions { get; init; }
 
     [JsonPropertyName("default_currency")]
     public string? DefaultCurrency { get; init; }

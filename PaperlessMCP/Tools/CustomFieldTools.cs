@@ -77,7 +77,10 @@ public static class CustomFieldTools
         {
             extraData = new CustomFieldExtraData
             {
-                SelectOptions = selectOptions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+                SelectOptions = selectOptions
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(o => new SelectOption { Label = o })
+                    .ToList()
             };
         }
         else if (dataType == CustomFieldDataType.Monetary && !string.IsNullOrEmpty(defaultCurrency))
@@ -129,7 +132,10 @@ public static class CustomFieldTools
         {
             extraData = new CustomFieldExtraData
             {
-                SelectOptions = selectOptions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+                SelectOptions = selectOptions
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(o => new SelectOption { Label = o })
+                    .ToList()
             };
         }
         else if (!string.IsNullOrEmpty(defaultCurrency))
