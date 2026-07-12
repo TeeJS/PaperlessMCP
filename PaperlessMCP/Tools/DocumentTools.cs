@@ -43,7 +43,7 @@ public static class DocumentTools
         DateTime? addedAfterDate = ParseDate(addedAfter);
         DateTime? addedBeforeDate = ParseDate(addedBefore);
 
-        var result = await client.SearchDocumentsAsync(
+        var searchResult = await client.SearchDocumentsWithResultAsync(
             query: query,
             tags: tagIds,
             tagsExclude: tagExcludeIds,
@@ -59,6 +59,20 @@ public static class DocumentTools
             pageSize: Math.Min(pageSize, 100),
             ordering: ordering
         ).ConfigureAwait(false);
+
+        if (!searchResult.IsSuccess)
+        {
+            var error = searchResult.Error!;
+            var errorResponse = McpErrorResponse.Create(
+                ErrorCodes.UpstreamError,
+                $"Failed to search documents: {error.Message}",
+                new { status_code = (int)error.StatusCode },
+                new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+            );
+            return JsonSerializer.Serialize(errorResponse);
+        }
+
+        var result = searchResult.Value!;
 
         // Map to lightweight summaries to reduce response size
         var summaries = result.Results
