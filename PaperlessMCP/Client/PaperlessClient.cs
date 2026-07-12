@@ -120,6 +120,45 @@ public class PaperlessClient
         string? ordering = null,
         CancellationToken cancellationToken = default)
     {
+        var result = await SearchDocumentsWithResultAsync(
+            query,
+            tags,
+            tagsExclude,
+            correspondent,
+            documentType,
+            storagePath,
+            createdAfter,
+            createdBefore,
+            addedAfter,
+            addedBefore,
+            archiveSerialNumber,
+            page,
+            pageSize,
+            ordering,
+            cancellationToken).ConfigureAwait(false);
+
+        return result.IsSuccess && result.Value != null
+            ? result.Value
+            : new PaginatedResult<DocumentSearchResult>();
+    }
+
+    internal async Task<ApiResult<PaginatedResult<DocumentSearchResult>>> SearchDocumentsWithResultAsync(
+        string? query = null,
+        int[]? tags = null,
+        int[]? tagsExclude = null,
+        int? correspondent = null,
+        int? documentType = null,
+        int? storagePath = null,
+        DateTime? createdAfter = null,
+        DateTime? createdBefore = null,
+        DateTime? addedAfter = null,
+        DateTime? addedBefore = null,
+        int? archiveSerialNumber = null,
+        int page = 1,
+        int? pageSize = null,
+        string? ordering = null,
+        CancellationToken cancellationToken = default)
+    {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
 
         if (!string.IsNullOrEmpty(query))
@@ -164,8 +203,7 @@ public class PaperlessClient
             queryParams["ordering"] = ordering;
 
         var url = $"api/documents/?{queryParams}";
-        return await GetAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false)
-               ?? new PaginatedResult<DocumentSearchResult>();
+        return await GetWithResultAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -774,22 +812,41 @@ public class PaperlessClient
 
     private async Task<T?> GetAsync<T>(string url, CancellationToken cancellationToken)
     {
+        var result = await GetWithResultAsync<T>(url, cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : default;
+    }
+
+    private async Task<ApiResult<T>> GetWithResultAsync<T>(string url, CancellationToken cancellationToken)
+    {
         try
         {
             var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                    return value != null
+                        ? ApiResult<T>.Success(value)
+                        : ApiResult<T>.Failure(HttpStatusCode.BadGateway, "Paperless returned an empty response body");
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "GET response deserialization failed: {Url}", url);
+                    return ApiResult<T>.Failure(
+                        HttpStatusCode.BadGateway,
+                        "Paperless returned an incompatible JSON response");
+                }
             }
 
-            await CreateApiError(response, "GET", url).ConfigureAwait(false);
-            return default;
+            var error = await CreateApiError(response, "GET", url).ConfigureAwait(false);
+            return ApiResult<T>.Failure(error);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GET request failed: {Url}", url);
-            return default;
+            return ApiResult<T>.Failure(HttpStatusCode.InternalServerError, ex.Message);
         }
     }
 

@@ -85,6 +85,108 @@ public class DocumentToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_WithCorrespondentAndNoteUserObject_ReturnsDocuments()
+    {
+        // Arrange
+        string? requestedPathAndQuery = null;
+        const string responseJson = """
+            {
+              "count": 1,
+              "next": null,
+              "previous": null,
+              "results": [
+                {
+                  "id": 42,
+                  "correspondent": 17,
+                  "document_type": 1,
+                  "storage_path": null,
+                  "title": "Corsair Invoice",
+                  "content": "Corsair",
+                  "tags": [],
+                  "created": "2026-06-01",
+                  "created_date": "2026-06-01",
+                  "modified": "2026-06-02T10:00:00Z",
+                  "added": "2026-06-02T10:00:00Z",
+                  "archive_serial_number": null,
+                  "original_file_name": "corsair.pdf",
+                  "archived_file_name": null,
+                  "owner": 1,
+                  "custom_fields": [],
+                  "notes": [
+                    {
+                      "id": 9,
+                      "note": "Reviewed",
+                      "created": "2026-06-02T11:00:00Z",
+                      "user": {
+                        "id": 2,
+                        "username": "alice",
+                        "first_name": "Alice",
+                        "last_name": "Doe"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+
+        _factory.MockHandler
+            .When(HttpMethod.Get, "https://paperless.example.com/api/documents/*")
+            .With(request =>
+            {
+                requestedPathAndQuery = request.RequestUri?.PathAndQuery;
+                return true;
+            })
+            .Respond("application/json", responseJson);
+
+        // Act
+        var result = await DocumentTools.Search(_factory.Client, correspondent: 17);
+
+        // Assert
+        requestedPathAndQuery.Should().Be("/api/documents/?correspondent__id=17&page=1&page_size=25");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("meta").GetProperty("total").GetInt32().Should().Be(1);
+        json.RootElement.GetProperty("result").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Search_WhenPaperlessResponseIsIncompatible_ReturnsUpstreamError()
+    {
+        // Arrange
+        const string responseJson = """
+            {
+              "count": 1,
+              "next": null,
+              "previous": null,
+              "results": [
+                {
+                  "id": "not-an-integer",
+                  "title": "Invalid document shape"
+                }
+              ]
+            }
+            """;
+
+        _factory.MockHandler
+            .When(HttpMethod.Get, "https://paperless.example.com/api/documents/*")
+            .Respond("application/json", responseJson);
+
+        // Act
+        var result = await DocumentTools.Search(_factory.Client, correspondent: 17);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("UPSTREAM_ERROR");
+        json.RootElement.GetProperty("error")
+            .GetProperty("details")
+            .GetProperty("status_code")
+            .GetInt32()
+            .Should().Be(502);
+    }
+
+    [Fact]
     public async Task Search_ByDefault_ExcludesContent()
     {
         // Arrange
