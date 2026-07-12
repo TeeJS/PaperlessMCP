@@ -615,19 +615,114 @@ public class PaperlessClient
         return await GetAsync<CustomField>($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<CustomField?> CreateCustomFieldAsync(CustomFieldCreateRequest request, CancellationToken cancellationToken = default)
+    private async Task<bool> UsesLegacySelectOptionFormatAsync(CancellationToken cancellationToken = default)
     {
-        return await PostAsync<CustomField>("api/custom_fields/", request, cancellationToken).ConfigureAwait(false);
+        var (success, version, _) = await PingAsync(cancellationToken).ConfigureAwait(false);
+        return success && UsesLegacySelectOptionFormat(version);
     }
 
-    public async Task<CustomField?> UpdateCustomFieldAsync(int id, CustomFieldUpdateRequest request, CancellationToken cancellationToken = default)
+    internal static bool UsesLegacySelectOptionFormat(string? version)
     {
-        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", request, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var parts = version.Trim().TrimStart('v', 'V').Split('.');
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor))
+        {
+            return false;
+        }
+
+        return major < 2 || major == 2 && minor < 14;
+    }
+
+    public async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await CreateCustomFieldAsync(request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldCreateRequest
+            {
+                Name = request.Name,
+                DataType = request.DataType,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PostAsync<CustomField>("api/custom_fields/", wireRequest, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await UpdateCustomFieldAsync(id, request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldUpdateRequest
+            {
+                Name = request.Name,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", wireRequest, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteCustomFieldAsync(int id, CancellationToken cancellationToken = default)
     {
         return await DeleteAsync($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static LegacyCustomFieldExtraData? ToLegacyExtraData(CustomFieldExtraData? extraData)
+    {
+        return extraData == null
+            ? null
+            : new LegacyCustomFieldExtraData
+            {
+                SelectOptions = extraData.SelectOptions?.Select(option => option.Label).ToList(),
+                DefaultCurrency = extraData.DefaultCurrency
+            };
+    }
+
+    private sealed record LegacyCustomFieldExtraData
+    {
+        public List<string>? SelectOptions { get; init; }
+        public string? DefaultCurrency { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldCreateRequest
+    {
+        public required string Name { get; init; }
+        public required string DataType { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldUpdateRequest
+    {
+        public string? Name { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
     }
 
     #endregion
