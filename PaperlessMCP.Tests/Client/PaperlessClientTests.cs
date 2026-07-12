@@ -1,5 +1,6 @@
 using System.Net;
 using FluentAssertions;
+using PaperlessMCP.Client;
 using PaperlessMCP.Models.Correspondents;
 using RichardSzalay.MockHttp;
 using Xunit;
@@ -442,6 +443,18 @@ public class PaperlessClientTests : IDisposable
     #endregion
 
     #region Custom Field Tests
+
+    [Theory]
+    [InlineData("2.13.5", true)]
+    [InlineData("v2.13.5", true)]
+    [InlineData("2.14.0", false)]
+    [InlineData("2.20.15", false)]
+    [InlineData("invalid", false)]
+    [InlineData(null, false)]
+    public void UsesLegacySelectOptionFormat_DetectsV214Boundary(string? version, bool expected)
+    {
+        PaperlessClient.UsesLegacySelectOptionFormat(version).Should().Be(expected);
+    }
 
     [Fact]
     public async Task GetCustomFieldsAsync_ReturnsCustomFieldList()

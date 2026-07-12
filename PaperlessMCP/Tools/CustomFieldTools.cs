@@ -77,10 +77,7 @@ public static class CustomFieldTools
         {
             extraData = new CustomFieldExtraData
             {
-                SelectOptions = selectOptions
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(o => new SelectOption { Label = o })
-                    .ToList()
+                SelectOptions = BuildSelectOptions(selectOptions)
             };
         }
         else if (dataType == CustomFieldDataType.Monetary && !string.IsNullOrEmpty(defaultCurrency))
@@ -130,12 +127,20 @@ public static class CustomFieldTools
 
         if (!string.IsNullOrEmpty(selectOptions))
         {
+            var existingField = await client.GetCustomFieldAsync(id).ConfigureAwait(false);
+            if (existingField == null)
+            {
+                var errorResponse = McpErrorResponse.Create(
+                    ErrorCodes.NotFound,
+                    $"Custom field with ID {id} not found or update failed",
+                    meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+                );
+                return JsonSerializer.Serialize(errorResponse);
+            }
+
             extraData = new CustomFieldExtraData
             {
-                SelectOptions = selectOptions
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(o => new SelectOption { Label = o })
-                    .ToList()
+                SelectOptions = BuildSelectOptions(selectOptions, existingField.ExtraData?.SelectOptions)
             };
         }
         else if (!string.IsNullOrEmpty(defaultCurrency))
@@ -307,5 +312,30 @@ public static class CustomFieldTools
             new McpMeta { PaperlessBaseUrl = client.BaseUrl }
         );
         return JsonSerializer.Serialize(response);
+    }
+
+    private static List<SelectOption> BuildSelectOptions(
+        string selectOptions,
+        IEnumerable<SelectOption>? existingOptions = null)
+    {
+        var existingByLabel = (existingOptions ?? Enumerable.Empty<SelectOption>())
+            .GroupBy(option => option.Label, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<SelectOption>(group),
+                StringComparer.Ordinal);
+
+        return selectOptions
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(label =>
+            {
+                if (existingByLabel.TryGetValue(label, out var matches) && matches.TryDequeue(out var existingOption))
+                {
+                    return new SelectOption { Id = existingOption.Id, Label = label };
+                }
+
+                return new SelectOption { Label = label };
+            })
+            .ToList();
     }
 }

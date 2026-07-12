@@ -204,7 +204,16 @@ public static class TestFixtures
             Id = id,
             Name = name,
             DataType = dataType,
-            ExtraData = dataType == "select" ? new CustomFieldExtraData { SelectOptions = ["Option 1", "Option 2"] } : null
+            ExtraData = dataType == "select"
+                ? new CustomFieldExtraData
+                {
+                    SelectOptions =
+                    [
+                        new SelectOption { Id = "option-1", Label = "Option 1" },
+                        new SelectOption { Id = "option-2", Label = "Option 2" }
+                    ]
+                }
+                : null
         };
 
         public static PaginatedResult<CustomField> CreateCustomFieldList(int count = 3) => new()
