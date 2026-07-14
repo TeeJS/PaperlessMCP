@@ -507,13 +507,13 @@ public static class DocumentTools
             _ => null
         };
 
-        var success = await client.BulkEditDocumentsAsync(ids, operation, parameters).ConfigureAwait(false);
+        var (success, bulkError) = await client.BulkEditDocumentsAsync(ids, operation, parameters).ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                "Bulk operation failed",
+                $"Bulk operation failed: {bulkError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);
@@ -562,13 +562,13 @@ public static class DocumentTools
             return JsonSerializer.Serialize(dryRunResponse);
         }
 
-        var success = await client.BulkEditDocumentsAsync(new[] { id }, "reprocess").ConfigureAwait(false);
+        var (success, reprocessError) = await client.BulkEditDocumentsAsync(new[] { id }, "reprocess").ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                $"Failed to reprocess document with ID {id}",
+                $"Failed to reprocess document with ID {id}: {reprocessError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);

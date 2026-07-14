@@ -688,6 +688,29 @@ public class DocumentToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkUpdate_WhenUpstreamFails_ReturnsErrorDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Invalid tag ID\"}";
+        _factory.SetupPostWithError("api/documents/bulk_edit/", HttpStatusCode.BadRequest, errorBody);
+
+        // Act
+        var result = await DocumentTools.BulkUpdate(
+            _factory.Client,
+            documentIds: "1,2,3",
+            operation: "add_tag",
+            value: 999,
+            dryRun: false,
+            confirm: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("message").GetString()
+            .Should().Contain("HTTP 400").And.Contain("Invalid tag ID");
+    }
+
+    [Fact]
     public async Task BulkUpdate_WithInvalidOperation_ReturnsValidationError()
     {
         // Act
@@ -753,6 +776,23 @@ public class DocumentToolsTests : IDisposable
         var json = JsonDocument.Parse(result);
         json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
         json.RootElement.GetProperty("result").GetProperty("status").GetString().Should().Be("queued");
+    }
+
+    [Fact]
+    public async Task Reprocess_WhenUpstreamFails_ReturnsErrorDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Document cannot be reprocessed\"}";
+        _factory.SetupPostWithError("api/documents/bulk_edit/", HttpStatusCode.BadRequest, errorBody);
+
+        // Act
+        var result = await DocumentTools.Reprocess(_factory.Client, 1, confirm: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("message").GetString()
+            .Should().Contain("HTTP 400").And.Contain("Document cannot be reprocessed");
     }
 
     #endregion

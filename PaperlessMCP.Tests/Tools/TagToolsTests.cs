@@ -342,6 +342,23 @@ public class TagToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkDelete_WhenUpstreamFails_ReturnsErrorDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Object is protected\"}";
+        _factory.SetupPostWithError("api/bulk_edit_objects/", HttpStatusCode.Conflict, errorBody);
+
+        // Act
+        var result = await TagTools.BulkDelete(_factory.Client, "1,2,3", dryRun: false, confirm: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("message").GetString()
+            .Should().Contain("HTTP 409").And.Contain("Object is protected");
+    }
+
+    [Fact]
     public async Task BulkDelete_WithEmptyIds_ReturnsValidationError()
     {
         // Act

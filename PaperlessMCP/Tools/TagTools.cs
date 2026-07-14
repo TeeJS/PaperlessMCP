@@ -249,13 +249,13 @@ public static class TagTools
             return JsonSerializer.Serialize(dryRunResponse);
         }
 
-        var success = await client.BulkEditObjectsAsync(ids, "tags", "delete").ConfigureAwait(false);
+        var (success, bulkError) = await client.BulkEditObjectsAsync(ids, "tags", "delete").ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                "Bulk delete operation failed",
+                $"Bulk delete operation failed: {bulkError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);
