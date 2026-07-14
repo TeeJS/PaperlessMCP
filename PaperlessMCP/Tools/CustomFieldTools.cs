@@ -19,16 +19,17 @@ public static class CustomFieldTools
     public static async Task<string> List(
         PaperlessClient client,
         [Description("Page number (default: 1)")] int page = 1,
-        [Description("Page size (default: 25, max: 100)")] int pageSize = 25)
+        [Description("Page size (default: 25, capped by MAX_PAGE_SIZE)")] int pageSize = 25)
     {
-        var result = await client.GetCustomFieldsAsync(page, Math.Min(pageSize, 100)).ConfigureAwait(false);
+        var effectivePageSize = client.GetEffectivePageSize(pageSize);
+        var result = await client.GetCustomFieldsAsync(page, effectivePageSize).ConfigureAwait(false);
 
         var response = McpResponse<object>.Success(
             result.Results,
             new McpMeta
             {
                 Page = page,
-                PageSize = pageSize,
+                PageSize = effectivePageSize,
                 Total = result.Count,
                 Next = result.Next,
                 PaperlessBaseUrl = client.BaseUrl

@@ -38,13 +38,13 @@ Everything. Full CRUD on every entity type:
 
 **43 tools** covering:
 - **Documents** — search, upload, download, update, delete, bulk operations, OCR reprocessing
-- **Tags** — full CRUD with colors and matching rules
+- **Tags** — full CRUD with colors, matching rules, and hierarchical parents
 - **Correspondents** — track who sends you stuff
 - **Document Types** — classify invoices, receipts, contracts, whatever
 - **Storage Paths** — organize files with smart templates
 - **Custom Fields** — add your own metadata (dates, amounts, URLs, etc.)
 
-All destructive operations require explicit confirmation and default to dry-run mode. AI can't nuke your archive by accident.
+All destructive operations require explicit confirmation. Bulk operations default to dry-run mode, so AI can't nuke your archive by accident.
 
 ---
 
@@ -63,7 +63,7 @@ All destructive operations require explicit confirmation and default to dry-run 
 
 - You don't use Paperless-ngx (this isn't a general document tool)
 - You enjoy manually tagging documents (weirdo, but respect)
-- You don't trust AI with your files (fair, but you can dry-run everything first)
+- You don't trust AI with your files (fair; destructive operations require confirmation, and bulk operations default to dry-run)
 
 **The sweet spot:** You've got Paperless running, you've got an MCP-compatible AI, and you want them to be friends.
 
@@ -94,7 +94,7 @@ docker run -d \
   ghcr.io/barryw/paperlessmcp:vX.Y.Z
 ```
 
-> **Grab the version from the badge above.** We don't use `latest` because [you deserve reproducible deployments](https://vsupalov.com/docker-latest-tag/).
+> **Grab the version from the badge above.** The release pipeline also publishes `latest`, but pinning a versioned tag gives you a [reproducible deployment](https://vsupalov.com/docker-latest-tag/).
 
 Connect your MCP client to `http://localhost:5000/mcp` and start talking to your documents.
 
@@ -150,7 +150,7 @@ claude mcp list
 
 ### Option 4: LiteLLM Proxy
 
-LiteLLM 1.83.7 can register PaperlessMCP as a Streamable HTTP MCP server in `config.yaml`.
+LiteLLM can register PaperlessMCP as a Streamable HTTP MCP server in `config.yaml`.
 
 Start PaperlessMCP first using Docker, Kubernetes, or source, then add it to LiteLLM:
 
@@ -186,20 +186,23 @@ For the homelabbers running k8s. We include ready-to-use manifests with Kustomiz
 git clone https://github.com/barryw/PaperlessMCP.git
 cd PaperlessMCP/k8s
 
-# Create your secrets
-kubectl create secret generic paperless-mcp \
-  --from-literal=PAPERLESS_BASE_URL=https://your-paperless.example.com
+# Customize the checked-in manifests:
+# - Set PAPERLESS_BASE_URL in secret.yaml.
+# - Pin a versioned image tag in deployment.yaml.
+# - The image is public, so remove imagePullSecrets unless your cluster
+#   provides the referenced ghcr-secret.
 
+# Create the API token secret (it is not managed by kustomization.yaml)
 kubectl create secret generic paperless-token \
   --from-literal=token=your-api-token-here
 
-# Deploy (edit the image tag first)
+# Deploy
 kubectl apply -k .
 ```
 
 [See the manifests](k8s/)
 
-Includes: Deployment, Service, Ingress, Kustomization. Tweak to taste.
+Includes: Deployment, Service, Ingress, base-URL Secret, and Kustomization. Tweak to taste.
 
 ### Option 6: From Source
 
@@ -225,17 +228,17 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.documents.search` | Find documents with full-text search and filters |
-| `paperless.documents.get` | Get a document by ID with all metadata |
-| `paperless.documents.upload` | Upload a document (base64) |
-| `paperless.documents.upload_from_path` | Upload from a file path |
-| `paperless.documents.update` | Update title, tags, correspondent, etc. |
-| `paperless.documents.delete` | Delete a document (requires confirmation) |
-| `paperless.documents.bulk_update` | Update multiple documents at once |
-| `paperless.documents.download` | Get download URL for original file |
-| `paperless.documents.preview` | Get preview URL |
-| `paperless.documents.thumbnail` | Get thumbnail URL |
-| `paperless.documents.reprocess` | Re-run OCR on a document |
+| `paperless_documents_search` | Find documents with full-text search and filters |
+| `paperless_documents_get` | Get a document by ID with all metadata |
+| `paperless_documents_upload` | Upload a document (base64) |
+| `paperless_documents_upload_from_path` | Upload from a file path |
+| `paperless_documents_update` | Update title, tags, correspondent, etc. |
+| `paperless_documents_delete` | Delete a document (requires confirmation) |
+| `paperless_documents_bulk_update` | Update multiple documents at once |
+| `paperless_documents_download` | Get download URL for original file |
+| `paperless_documents_preview` | Get preview URL |
+| `paperless_documents_thumbnail` | Get thumbnail URL |
+| `paperless_documents_reprocess` | Re-run OCR on a document |
 
 </details>
 
@@ -244,12 +247,12 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.tags.list` | List all tags |
-| `paperless.tags.get` | Get a tag by ID |
-| `paperless.tags.create` | Create a tag with optional color and matching rules |
-| `paperless.tags.update` | Update a tag |
-| `paperless.tags.delete` | Delete a tag |
-| `paperless.tags.bulk_delete` | Delete multiple tags |
+| `paperless_tags_list` | List all tags |
+| `paperless_tags_get` | Get a tag by ID |
+| `paperless_tags_create` | Create a tag with optional color, matching rules, and parent |
+| `paperless_tags_update` | Update a tag, including changing or clearing its parent |
+| `paperless_tags_delete` | Delete a tag |
+| `paperless_tags_bulk_delete` | Delete multiple tags |
 
 </details>
 
@@ -258,12 +261,12 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.correspondents.list` | List all correspondents |
-| `paperless.correspondents.get` | Get a correspondent by ID |
-| `paperless.correspondents.create` | Create with optional matching rules |
-| `paperless.correspondents.update` | Update a correspondent |
-| `paperless.correspondents.delete` | Delete a correspondent |
-| `paperless.correspondents.bulk_delete` | Delete multiple correspondents |
+| `paperless_correspondents_list` | List all correspondents |
+| `paperless_correspondents_get` | Get a correspondent by ID |
+| `paperless_correspondents_create` | Create with optional matching rules |
+| `paperless_correspondents_update` | Update a correspondent |
+| `paperless_correspondents_delete` | Delete a correspondent |
+| `paperless_correspondents_bulk_delete` | Delete multiple correspondents |
 
 </details>
 
@@ -272,12 +275,12 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.document_types.list` | List all document types |
-| `paperless.document_types.get` | Get a document type by ID |
-| `paperless.document_types.create` | Create with optional matching rules |
-| `paperless.document_types.update` | Update a document type |
-| `paperless.document_types.delete` | Delete a document type |
-| `paperless.document_types.bulk_delete` | Delete multiple document types |
+| `paperless_document_types_list` | List all document types |
+| `paperless_document_types_get` | Get a document type by ID |
+| `paperless_document_types_create` | Create with optional matching rules |
+| `paperless_document_types_update` | Update a document type |
+| `paperless_document_types_delete` | Delete a document type |
+| `paperless_document_types_bulk_delete` | Delete multiple document types |
 
 </details>
 
@@ -286,12 +289,12 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.storage_paths.list` | List all storage paths |
-| `paperless.storage_paths.get` | Get a storage path by ID |
-| `paperless.storage_paths.create` | Create with path template |
-| `paperless.storage_paths.update` | Update a storage path |
-| `paperless.storage_paths.delete` | Delete a storage path |
-| `paperless.storage_paths.bulk_delete` | Delete multiple storage paths |
+| `paperless_storage_paths_list` | List all storage paths |
+| `paperless_storage_paths_get` | Get a storage path by ID |
+| `paperless_storage_paths_create` | Create with path template |
+| `paperless_storage_paths_update` | Update a storage path |
+| `paperless_storage_paths_delete` | Delete a storage path |
+| `paperless_storage_paths_bulk_delete` | Delete multiple storage paths |
 
 </details>
 
@@ -300,12 +303,12 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.custom_fields.list` | List all custom field definitions |
-| `paperless.custom_fields.get` | Get a custom field by ID |
-| `paperless.custom_fields.create` | Create a field (string, date, number, monetary, etc.) |
-| `paperless.custom_fields.update` | Update a field definition |
-| `paperless.custom_fields.delete` | Delete a field |
-| `paperless.custom_fields.assign` | Assign a field value to a document |
+| `paperless_custom_fields_list` | List all custom field definitions |
+| `paperless_custom_fields_get` | Get a custom field by ID |
+| `paperless_custom_fields_create` | Create a field (string, date, number, monetary, etc.) |
+| `paperless_custom_fields_update` | Update a field definition |
+| `paperless_custom_fields_delete` | Delete a field |
+| `paperless_custom_fields_assign` | Assign a field value to a document |
 
 </details>
 
@@ -314,8 +317,8 @@ Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 | Tool | What it does |
 |------|--------------|
-| `paperless.ping` | Check connectivity and auth |
-| `paperless.capabilities` | List supported features |
+| `paperless_ping` | Check connectivity and auth |
+| `paperless_capabilities` | List supported features |
 
 </details>
 
@@ -331,7 +334,7 @@ Environment variables. That's it. No config files to manage.
 | `PAPERLESS_API_TOKEN` | Yes | — | API token for authentication |
 | `MCP_PORT` | | `5000` | Port for Streamable HTTP mode |
 | `MCP_RELAX_ACCEPT_HEADER` | | `false` | Normalize `/mcp` POST `Accept` headers for clients that cannot send both Streamable HTTP media types |
-| `MAX_PAGE_SIZE` | | `100` | Max items per paginated request |
+| `MAX_PAGE_SIZE` | | `100` | Upper bound for paginated Paperless-ngx requests made by this server |
 | `HTTP_TIMEOUT_SECONDS` | | `30` | Timeout for requests to Paperless-ngx. Raise it if large full-text searches time out |
 
 Aliases supported: `PAPERLESS_URL` and `PAPERLESS_TOKEN` also work if that's your style.
@@ -367,7 +370,7 @@ dotnet test
 **The rules:**
 - Conventional commits (`feat:`, `fix:`, `docs:`, etc.) — versions bump automatically
 - Tests pass or it doesn't merge
-- Destructive operations need `confirm=true` and dry-run by default
+- Destructive operations need `confirm=true`; bulk operations default to dry-run
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full rundown.
 
