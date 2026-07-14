@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PaperlessMCP.Models.Tags;
@@ -36,6 +37,9 @@ public record Tag
 
     [JsonPropertyName("owner")]
     public int? Owner { get; init; }
+
+    [JsonPropertyName("parent")]
+    public int? Parent { get; init; }
 }
 
 /// <summary>
@@ -57,6 +61,9 @@ public record TagCreateRequest
 
     [JsonPropertyName("is_inbox_tag")]
     public bool? IsInboxTag { get; init; }
+
+    [JsonPropertyName("parent")]
+    public int? Parent { get; init; }
 }
 
 /// <summary>
@@ -78,6 +85,56 @@ public record TagUpdateRequest
 
     [JsonPropertyName("is_inbox_tag")]
     public bool? IsInboxTag { get; init; }
+
+    [JsonPropertyName("parent")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public TagParentUpdate Parent { get; init; }
+}
+
+/// <summary>
+/// Represents an optional parent change for a tag update.
+/// </summary>
+[JsonConverter(typeof(TagParentUpdateJsonConverter))]
+public readonly record struct TagParentUpdate
+{
+    private TagParentUpdate(bool isSpecified, int? value)
+    {
+        IsSpecified = isSpecified;
+        Value = value;
+    }
+
+    public bool IsSpecified { get; }
+
+    public int? Value { get; }
+
+    public static TagParentUpdate Set(int parentId) => new(true, parentId);
+
+    public static TagParentUpdate Clear => new(true, null);
+}
+
+public sealed class TagParentUpdateJsonConverter : JsonConverter<TagParentUpdate>
+{
+    public override TagParentUpdate Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+            return TagParentUpdate.Clear;
+
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var parentId))
+            return TagParentUpdate.Set(parentId);
+
+        throw new JsonException("Tag parent must be an integer ID or null.");
+    }
+
+    public override void Write(Utf8JsonWriter writer, TagParentUpdate value, JsonSerializerOptions options)
+    {
+        if (!value.IsSpecified || value.Value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        writer.WriteNumberValue(value.Value.Value);
+    }
 }
 
 /// <summary>
