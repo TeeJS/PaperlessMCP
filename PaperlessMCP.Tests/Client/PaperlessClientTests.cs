@@ -540,6 +540,27 @@ public class PaperlessClientTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkEditDocumentsAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/documents/bulk_edit/")
+            .Throw(new OperationCanceledException(cancellation.Token));
+
+        // Act
+        Func<Task> act = async () =>
+            await _factory.Client.BulkEditDocumentsAsync(
+                [1],
+                "reprocess",
+                cancellationToken: cancellation.Token);
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task BulkEditObjectsAsync_WhenSuccessful_ReturnsSuccessWithoutError()
     {
         // Arrange
@@ -566,6 +587,44 @@ public class PaperlessClientTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         result.Error.Should().Be($"HTTP 409: {errorBody}");
+    }
+
+    [Fact]
+    public async Task BulkEditObjectsAsync_WhenTransportFails_ReturnsExceptionMessage()
+    {
+        // Arrange
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/bulk_edit_objects/")
+            .Throw(new HttpRequestException("network unavailable"));
+
+        // Act
+        var result = await _factory.Client.BulkEditObjectsAsync([1], "tags", "delete");
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("network unavailable");
+    }
+
+    [Fact]
+    public async Task BulkEditObjectsAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/bulk_edit_objects/")
+            .Throw(new OperationCanceledException(cancellation.Token));
+
+        // Act
+        Func<Task> act = async () =>
+            await _factory.Client.BulkEditObjectsAsync(
+                [1],
+                "tags",
+                "delete",
+                cancellationToken: cancellation.Token);
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     #endregion
