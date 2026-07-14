@@ -51,6 +51,7 @@ Environment variables (take precedence over appsettings.json):
 - `PAPERLESS_API_TOKEN` / `PAPERLESS_TOKEN` - API authentication token
 - `MAX_PAGE_SIZE` - Max items per page (default: 100)
 - `MCP_PORT` - HTTP server port (default: 5000)
+- `HTTP_TIMEOUT_SECONDS` - Timeout for Paperless API requests (default: 30)
 
 ### Testing
 
@@ -62,11 +63,18 @@ Tests use xUnit with FluentAssertions for assertions, NSubstitute for mocking, a
 - Trunk-based development: feature branches merge directly to `main`
 - All destructive operations (delete, bulk operations) require explicit `confirm=true` and default to dry-run mode
 
-## Versioning with Cocogitto (cog)
+## Versioning & Releases
 
-This repo uses [Cocogitto](https://docs.cocogitto.io/) for conventional commit enforcement and version management.
+**Single source of truth: git tags (`vX.Y.Z`).** Everything else is derived from the tag at release time — never hand-edit a version anywhere.
 
-**Git hook:** A `commit-msg` hook enforces conventional commits. Install it after cloning:
+**Releases are fully automated** by `.woodpecker/release.yml` on every push to `main`:
+1. `calculate-version` reads the latest tag and the conventional commits since it, then computes the next version (`feat` → minor, `fix`/`perf`/`refactor`/`build`/`ci`/`docs`/`style`/`test` → patch, `!`/`BREAKING CHANGE` → major, nothing → no release).
+2. The new version is injected into the NuGet package (`/p:Version`), the Docker image (`--build-arg VERSION` + `:vX.Y.Z`/`:latest`), `version.json`, and `PaperlessMCP.csproj` `<Version>` (the csproj literal is rewritten and committed so a local `dotnet build` reports the real version).
+3. A `chore(release): bump version to X.Y.Z [skip ci]` commit, a `vX.Y.Z` tag, and a GitHub release are created and pushed.
+
+Do **not** run `cog bump` — it is not part of the release flow and would fight the pipeline. The version comes from tags, not from any file.
+
+**Cocogitto's only job here is commit-message validation.** A `commit-msg` hook (and the `pr.yml` commitlint step) enforce Conventional Commits. Install the local hook after cloning:
 ```bash
 cog install-hook commit-msg
 ```
@@ -82,18 +90,6 @@ cog install-hook commit-msg
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
 
-**Version bumping:**
-```bash
-cog bump --auto          # Auto-detect bump type from commits
-cog bump --patch         # Bump patch version (0.1.12 -> 0.1.13)
-cog bump --minor         # Bump minor version (0.1.12 -> 0.2.0)
-cog bump --major         # Bump major version (0.1.12 -> 1.0.0)
-cog bump --dry-run       # Preview what would happen
-```
-
-**Other useful commands:**
 ```bash
 cog check                # Verify all commits follow conventional format
-cog changelog            # Generate changelog
-cog get-version          # Show current version
 ```

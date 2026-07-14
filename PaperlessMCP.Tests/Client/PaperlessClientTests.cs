@@ -1,5 +1,6 @@
 using System.Net;
 using FluentAssertions;
+using PaperlessMCP.Client;
 using PaperlessMCP.Models.Correspondents;
 using RichardSzalay.MockHttp;
 using Xunit;
@@ -443,6 +444,18 @@ public class PaperlessClientTests : IDisposable
 
     #region Custom Field Tests
 
+    [Theory]
+    [InlineData("2.13.5", true)]
+    [InlineData("v2.13.5", true)]
+    [InlineData("2.14.0", false)]
+    [InlineData("2.20.15", false)]
+    [InlineData("invalid", false)]
+    [InlineData(null, false)]
+    public void UsesLegacySelectOptionFormat_DetectsV214Boundary(string? version, bool expected)
+    {
+        PaperlessClient.UsesLegacySelectOptionFormat(version).Should().Be(expected);
+    }
+
     [Fact]
     public async Task GetCustomFieldsAsync_ReturnsCustomFieldList()
     {
@@ -505,6 +518,120 @@ public class PaperlessClientTests : IDisposable
 
         // Assert
         result.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Request Body Serialization Tests
+
+    // Wire-format documentation tests. These capture the outbound request body and
+    // assert the expected payload reaches the HTTP layer. They DO NOT reproduce the
+    // production bug that motivated the fix — that bug only manifested through the DI
+    // HttpClient pipeline (DelegatingHandler + Polly retry policy), and these tests
+    // wire MockHttp directly into the HttpClient, bypassing that chain. Treat these as
+    // pinning tests for the new code path. A higher-fidelity regression test would
+    // need to register PaperlessClient through ServiceCollection with the same handler
+    // pipeline used in Program.cs.
+
+    [Fact]
+    public async Task CreateCorrespondentAsync_SendsNameInRequestBody()
+    {
+        // Arrange — capture the actual outbound body
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/correspondents/")
+            .With(req =>
+            {
+                capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Correspondents.CreateCorrespondentJson(1, "ACME Corp"));
+
+        // Act
+        await _factory.Client.CreateCorrespondentAsync(new CorrespondentCreateRequest { Name = "ACME Corp" });
+
+        // Assert — the body must include the name on the wire.
+        capturedBody.Should().NotBeNullOrEmpty();
+        capturedBody.Should().Contain("\"name\":\"ACME Corp\"");
+    }
+
+    [Fact]
+    public async Task UpdateDocumentAsync_SendsUpdatedFieldsInRequestBody()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/documents/42/")
+            .With(req =>
+            {
+                capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", "{\"id\":42}");
+
+        // Act
+        await _factory.Client.UpdateDocumentAsync(42, new DocumentUpdateRequest
+        {
+            Title = "New Title",
+            Correspondent = 7,
+            Tags = new List<int> { 1, 2 }
+        });
+
+        // Assert — the PATCH body must contain the updated fields on the wire.
+        capturedBody.Should().NotBeNullOrEmpty();
+        capturedBody.Should().Contain("\"title\":\"New Title\"");
+        capturedBody.Should().Contain("\"correspondent\":7");
+        capturedBody.Should().Contain("\"tags\":[1,2]");
+    }
+
+    [Fact]
+    public async Task BulkEditDocumentsAsync_SerializesInnerParametersWithRuntimeType()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/documents/bulk_edit/")
+            .With(req =>
+            {
+                capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", "{}");
+
+        // Act
+        await _factory.Client.BulkEditDocumentsAsync([1, 2, 3], "add_tag", new { tag = 5 });
+
+        // Assert — the inner `parameters` field must contain the actual tag, not `{}`.
+        capturedBody.Should().NotBeNullOrEmpty();
+        capturedBody.Should().Contain("\"documents\":[1,2,3]");
+        capturedBody.Should().Contain("\"method\":\"add_tag\"");
+        capturedBody.Should().Contain("\"parameters\":{\"tag\":5}");
+    }
+
+    [Fact]
+    public async Task BulkEditObjectsAsync_SerializesInnerParametersWithRuntimeType()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/bulk_edit_objects/")
+            .With(req =>
+            {
+                capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", "{}");
+
+        // Act
+        await _factory.Client.BulkEditObjectsAsync([10, 20], "tags", "set_permissions",
+            new { owner = 3, set_permissions = new { view = new { users = new[] { 1 } } } });
+
+        // Assert
+        capturedBody.Should().NotBeNullOrEmpty();
+        capturedBody.Should().Contain("\"objects\":[10,20]");
+        capturedBody.Should().Contain("\"object_type\":\"tags\"");
+        capturedBody.Should().Contain("\"operation\":\"set_permissions\"");
+        capturedBody.Should().Contain("\"owner\":3");
     }
 
     #endregion

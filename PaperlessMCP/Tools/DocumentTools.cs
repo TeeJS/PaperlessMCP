@@ -43,7 +43,7 @@ public static class DocumentTools
         DateTime? addedAfterDate = ParseDate(addedAfter);
         DateTime? addedBeforeDate = ParseDate(addedBefore);
 
-        var result = await client.SearchDocumentsAsync(
+        var searchResult = await client.SearchDocumentsWithResultAsync(
             query: query,
             tags: tagIds,
             tagsExclude: tagExcludeIds,
@@ -59,6 +59,20 @@ public static class DocumentTools
             pageSize: Math.Min(pageSize, 100),
             ordering: ordering
         ).ConfigureAwait(false);
+
+        if (!searchResult.IsSuccess)
+        {
+            var error = searchResult.Error!;
+            var errorResponse = McpErrorResponse.Create(
+                ErrorCodes.UpstreamError,
+                $"Failed to search documents: {error.Message}",
+                new { status_code = (int)error.StatusCode },
+                new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+            );
+            return JsonSerializer.Serialize(errorResponse);
+        }
+
+        var result = searchResult.Value!;
 
         // Map to lightweight summaries to reduce response size
         var summaries = result.Results
@@ -337,7 +351,8 @@ public static class DocumentTools
         [Description("Storage path ID (optional, use -1 to clear)")] int? storagePath = null,
         [Description("Tag IDs to set (comma-separated, optional)")] string? tags = null,
         [Description("Archive serial number (optional)")] int? archiveSerialNumber = null,
-        [Description("Created date (YYYY-MM-DD, optional)")] string? created = null)
+        [Description("Created date (YYYY-MM-DD, optional)")] string? created = null,
+        [Description("Include the document's full OCR content in the response (default: false). Leave false for metadata-only updates to save tokens.")] bool includeContent = false)
     {
         var request = new DocumentUpdateRequest
         {
@@ -364,8 +379,12 @@ public static class DocumentTools
             return JsonSerializer.Serialize(errorResponse);
         }
 
+        // Metadata updates do not need the full OCR content echoed back; stripping it
+        // keeps bulk rename/retag workflows from burning tokens on unused content.
+        var document = includeContent ? result.Value! : result.Value! with { Content = string.Empty };
+
         var response = McpResponse<Document>.Success(
-            result.Value!,
+            document,
             new McpMeta { PaperlessBaseUrl = client.BaseUrl }
         );
         return JsonSerializer.Serialize(response);
