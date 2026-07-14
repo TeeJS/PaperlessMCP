@@ -200,6 +200,30 @@ public class TagToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Update_WithoutParent_OmitsParentField()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/tags/1/")
+            .With(request =>
+            {
+                capturedBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Tags.CreateTagJson(1, "Updated Child", parent: 2));
+
+        // Act
+        var result = await TagTools.Update(_factory.Client, 1, name: "Updated Child");
+
+        // Assert
+        capturedBody.Should().NotContain("\"parent\"");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result").GetProperty("parent").GetInt32().Should().Be(2);
+    }
+
+    [Fact]
     public async Task Update_WithParent_SendsParentId()
     {
         // Arrange
