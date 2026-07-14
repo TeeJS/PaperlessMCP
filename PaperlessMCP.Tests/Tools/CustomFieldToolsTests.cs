@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using PaperlessMCP.Models.CustomFields;
 using PaperlessMCP.Tests.Fixtures;
 using RichardSzalay.MockHttp;
 using PaperlessMCP.Tools;
@@ -89,7 +90,18 @@ public class CustomFieldToolsTests : IDisposable
     {
         // Arrange
         var selectField = TestFixtures.CustomFields.CreateCustomField(1, "Status", "select");
-        _factory.SetupPost("api/custom_fields/", JsonSerializer.Serialize(selectField));
+        _factory.SetupGet("api/status/", """{"pngx_version":"2.20.15"}""");
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/custom_fields/")
+            .WithJsonContent<JsonElement>(json =>
+                json.GetProperty("name").GetString() == "Status"
+                && json.GetProperty("data_type").GetString() == "select"
+                && HasObjectSelectOptions(
+                    json,
+                    new SelectOption { Label = "Pending" },
+                    new SelectOption { Label = "Approved" },
+                    new SelectOption { Label = "Rejected" }))
+            .Respond("application/json", JsonSerializer.Serialize(selectField));
 
         // Act
         var result = await CustomFieldTools.Create(
@@ -101,6 +113,48 @@ public class CustomFieldToolsTests : IDisposable
         // Assert
         var json = JsonDocument.Parse(result);
         json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result")
+            .GetProperty("extra_data")
+            .GetProperty("select_options")[0]
+            .GetProperty("id")
+            .GetString()
+            .Should().Be("option-1");
+    }
+
+    [Fact]
+    public async Task Create_SelectField_BeforeV214_UsesStringOptions()
+    {
+        // Arrange
+        string? requestBody = null;
+        _factory.SetupGet("api/status/", """{"pngx_version":"2.13.5"}""");
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/custom_fields/")
+            .With(request =>
+            {
+                requestBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(
+                "application/json",
+                """{"id":1,"name":"Status","data_type":"select","extra_data":{"select_options":["Pending","Approved","Rejected"]}}""");
+
+        // Act
+        var result = await CustomFieldTools.Create(
+            _factory.Client,
+            "Status",
+            "select",
+            selectOptions: "Pending,Approved,Rejected");
+
+        // Assert
+        using var requestJson = JsonDocument.Parse(requestBody!);
+        HasStringSelectOptions(requestJson.RootElement, "Pending", "Approved", "Rejected").Should().BeTrue();
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue("because response was {0}", result);
+        var firstOption = json.RootElement.GetProperty("result")
+            .GetProperty("extra_data")
+            .GetProperty("select_options")[0];
+        firstOption.GetProperty("label").GetString().Should().Be("Pending");
+        firstOption.TryGetProperty("id", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -116,6 +170,98 @@ public class CustomFieldToolsTests : IDisposable
         var json = JsonDocument.Parse(result);
         json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
         json.RootElement.GetProperty("result").GetProperty("name").GetString().Should().Be("Updated Field");
+    }
+
+    [Fact]
+    public async Task Update_SelectField_PreservesExistingOptionIds()
+    {
+        // Arrange
+        var existingField = new CustomField
+        {
+            Id = 1,
+            Name = "Status",
+            DataType = "select",
+            ExtraData = new CustomFieldExtraData
+            {
+                SelectOptions =
+                [
+                    new SelectOption { Id = "pending-id", Label = "Pending" },
+                    new SelectOption { Id = "approved-id", Label = "Approved" }
+                ]
+            }
+        };
+        var updatedField = existingField with
+        {
+            ExtraData = new CustomFieldExtraData
+            {
+                SelectOptions =
+                [
+                    new SelectOption { Id = "pending-id", Label = "Pending" },
+                    new SelectOption { Id = "approved-id", Label = "Approved" },
+                    new SelectOption { Id = "rejected-id", Label = "Rejected" }
+                ]
+            }
+        };
+
+        _factory.SetupGet("api/custom_fields/1/", JsonSerializer.Serialize(existingField));
+        _factory.SetupGet("api/status/", """{"pngx_version":"2.20.15"}""");
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/custom_fields/1/")
+            .WithJsonContent<JsonElement>(json => HasObjectSelectOptions(
+                json,
+                new SelectOption { Id = "pending-id", Label = "Pending" },
+                new SelectOption { Id = "approved-id", Label = "Approved" },
+                new SelectOption { Label = "Rejected" }))
+            .Respond("application/json", JsonSerializer.Serialize(updatedField));
+
+        // Act
+        var result = await CustomFieldTools.Update(
+            _factory.Client,
+            1,
+            selectOptions: "Pending,Approved,Rejected");
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue("because response was {0}", result);
+        json.RootElement.GetProperty("result")
+            .GetProperty("extra_data")
+            .GetProperty("select_options")[2]
+            .GetProperty("id")
+            .GetString()
+            .Should().Be("rejected-id");
+    }
+
+    [Fact]
+    public async Task Update_SelectField_BeforeV214_UsesStringOptions()
+    {
+        // Arrange
+        const string existingField =
+            """{"id":1,"name":"Status","data_type":"select","extra_data":{"select_options":["Pending","Approved"]}}""";
+        const string updatedField =
+            """{"id":1,"name":"Status","data_type":"select","extra_data":{"select_options":["Pending","Rejected"]}}""";
+
+        _factory.SetupGet("api/custom_fields/1/", existingField);
+        _factory.SetupGet("api/status/", """{"pngx_version":"2.13.5"}""");
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/custom_fields/1/")
+            .WithJsonContent<JsonElement>(json => HasStringSelectOptions(json, "Pending", "Rejected"))
+            .Respond("application/json", updatedField);
+
+        // Act
+        var result = await CustomFieldTools.Update(
+            _factory.Client,
+            1,
+            selectOptions: "Pending,Rejected");
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result")
+            .GetProperty("extra_data")
+            .GetProperty("select_options")[1]
+            .GetProperty("label")
+            .GetString()
+            .Should().Be("Rejected");
     }
 
     [Fact]
@@ -195,5 +341,45 @@ public class CustomFieldToolsTests : IDisposable
         var json = JsonDocument.Parse(result);
         json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
         json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("NOT_FOUND");
+    }
+
+    private static bool HasStringSelectOptions(JsonElement request, params string[] expectedLabels)
+    {
+        var options = request.GetProperty("extra_data").GetProperty("select_options").EnumerateArray().ToArray();
+        return options.Length == expectedLabels.Length
+               && options.Select(option => option.GetString()).SequenceEqual(expectedLabels);
+    }
+
+    private static bool HasObjectSelectOptions(JsonElement request, params SelectOption[] expectedOptions)
+    {
+        var options = request.GetProperty("extra_data").GetProperty("select_options").EnumerateArray().ToArray();
+        if (options.Length != expectedOptions.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < options.Length; index++)
+        {
+            var option = options[index];
+            var expected = expectedOptions[index];
+            if (option.GetProperty("label").GetString() != expected.Label)
+            {
+                return false;
+            }
+
+            if (expected.Id == null)
+            {
+                if (option.TryGetProperty("id", out _))
+                {
+                    return false;
+                }
+            }
+            else if (!option.TryGetProperty("id", out var id) || id.GetString() != expected.Id)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

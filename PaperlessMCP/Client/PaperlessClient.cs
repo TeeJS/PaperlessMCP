@@ -120,6 +120,45 @@ public class PaperlessClient
         string? ordering = null,
         CancellationToken cancellationToken = default)
     {
+        var result = await SearchDocumentsWithResultAsync(
+            query,
+            tags,
+            tagsExclude,
+            correspondent,
+            documentType,
+            storagePath,
+            createdAfter,
+            createdBefore,
+            addedAfter,
+            addedBefore,
+            archiveSerialNumber,
+            page,
+            pageSize,
+            ordering,
+            cancellationToken).ConfigureAwait(false);
+
+        return result.IsSuccess && result.Value != null
+            ? result.Value
+            : new PaginatedResult<DocumentSearchResult>();
+    }
+
+    internal async Task<ApiResult<PaginatedResult<DocumentSearchResult>>> SearchDocumentsWithResultAsync(
+        string? query = null,
+        int[]? tags = null,
+        int[]? tagsExclude = null,
+        int? correspondent = null,
+        int? documentType = null,
+        int? storagePath = null,
+        DateTime? createdAfter = null,
+        DateTime? createdBefore = null,
+        DateTime? addedAfter = null,
+        DateTime? addedBefore = null,
+        int? archiveSerialNumber = null,
+        int page = 1,
+        int? pageSize = null,
+        string? ordering = null,
+        CancellationToken cancellationToken = default)
+    {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
 
         if (!string.IsNullOrEmpty(query))
@@ -164,8 +203,7 @@ public class PaperlessClient
             queryParams["ordering"] = ordering;
 
         var url = $"api/documents/?{queryParams}";
-        return await GetAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false)
-               ?? new PaginatedResult<DocumentSearchResult>();
+        return await GetWithResultAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -397,16 +435,26 @@ public class PaperlessClient
         object? parameters = null,
         CancellationToken cancellationToken = default)
     {
-        var request = new
+        // Build the body via JsonObject so the inner `parameters` payload serializes
+        // against its runtime type. If we wrap in an anonymous type with `parameters`
+        // typed as `object?`, System.Text.Json emits `"parameters":{}` and Paperless
+        // rejects the request (e.g. add_tag without a tag id).
+        var rootNode = new System.Text.Json.Nodes.JsonObject
         {
-            documents = documentIds,
-            method,
-            parameters
+            ["documents"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(documentIds, JsonOptions)),
+            ["method"] = method,
         };
+        if (parameters != null)
+        {
+            rootNode["parameters"] = System.Text.Json.Nodes.JsonNode.Parse(
+                JsonSerializer.Serialize(parameters, parameters.GetType(), JsonOptions));
+        }
+        var jsonString = rootNode.ToJsonString(JsonOptions);
+        var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/documents/bulk_edit/", request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -605,19 +653,114 @@ public class PaperlessClient
         return await GetAsync<CustomField>($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<CustomField?> CreateCustomFieldAsync(CustomFieldCreateRequest request, CancellationToken cancellationToken = default)
+    private async Task<bool> UsesLegacySelectOptionFormatAsync(CancellationToken cancellationToken = default)
     {
-        return await PostAsync<CustomField>("api/custom_fields/", request, cancellationToken).ConfigureAwait(false);
+        var (success, version, _) = await PingAsync(cancellationToken).ConfigureAwait(false);
+        return success && UsesLegacySelectOptionFormat(version);
     }
 
-    public async Task<CustomField?> UpdateCustomFieldAsync(int id, CustomFieldUpdateRequest request, CancellationToken cancellationToken = default)
+    internal static bool UsesLegacySelectOptionFormat(string? version)
     {
-        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", request, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var parts = version.Trim().TrimStart('v', 'V').Split('.');
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor))
+        {
+            return false;
+        }
+
+        return major < 2 || major == 2 && minor < 14;
+    }
+
+    public async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await CreateCustomFieldAsync(request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldCreateRequest
+            {
+                Name = request.Name,
+                DataType = request.DataType,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PostAsync<CustomField>("api/custom_fields/", wireRequest, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await UpdateCustomFieldAsync(id, request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldUpdateRequest
+            {
+                Name = request.Name,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", wireRequest, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteCustomFieldAsync(int id, CancellationToken cancellationToken = default)
     {
         return await DeleteAsync($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static LegacyCustomFieldExtraData? ToLegacyExtraData(CustomFieldExtraData? extraData)
+    {
+        return extraData == null
+            ? null
+            : new LegacyCustomFieldExtraData
+            {
+                SelectOptions = extraData.SelectOptions?.Select(option => option.Label).ToList(),
+                DefaultCurrency = extraData.DefaultCurrency
+            };
+    }
+
+    private sealed record LegacyCustomFieldExtraData
+    {
+        public List<string>? SelectOptions { get; init; }
+        public string? DefaultCurrency { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldCreateRequest
+    {
+        public required string Name { get; init; }
+        public required string DataType { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldUpdateRequest
+    {
+        public string? Name { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
     }
 
     #endregion
@@ -634,17 +777,26 @@ public class PaperlessClient
         object? parameters = null,
         CancellationToken cancellationToken = default)
     {
-        var request = new
+        // Same fix as BulkEditDocumentsAsync — wrapping `parameters` in an anonymous
+        // type means its compile-time type is `object?` and the inner payload becomes
+        // `{}`.
+        var rootNode = new System.Text.Json.Nodes.JsonObject
         {
-            objects = objectIds,
-            object_type = objectType,
-            operation,
-            parameters
+            ["objects"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(objectIds, JsonOptions)),
+            ["object_type"] = objectType,
+            ["operation"] = operation,
         };
+        if (parameters != null)
+        {
+            rootNode["parameters"] = System.Text.Json.Nodes.JsonNode.Parse(
+                JsonSerializer.Serialize(parameters, parameters.GetType(), JsonOptions));
+        }
+        var jsonString = rootNode.ToJsonString(JsonOptions);
+        var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
 
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("api/bulk_edit_objects/", request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -660,22 +812,41 @@ public class PaperlessClient
 
     private async Task<T?> GetAsync<T>(string url, CancellationToken cancellationToken)
     {
+        var result = await GetWithResultAsync<T>(url, cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : default;
+    }
+
+    private async Task<ApiResult<T>> GetWithResultAsync<T>(string url, CancellationToken cancellationToken)
+    {
         try
         {
             var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                    return value != null
+                        ? ApiResult<T>.Success(value)
+                        : ApiResult<T>.Failure(HttpStatusCode.BadGateway, "Paperless returned an empty response body");
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "GET response deserialization failed: {Url}", url);
+                    return ApiResult<T>.Failure(
+                        HttpStatusCode.BadGateway,
+                        "Paperless returned an incompatible JSON response");
+                }
             }
 
-            await CreateApiError(response, "GET", url).ConfigureAwait(false);
-            return default;
+            var error = await CreateApiError(response, "GET", url).ConfigureAwait(false);
+            return ApiResult<T>.Failure(error);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GET request failed: {Url}", url);
-            return default;
+            return ApiResult<T>.Failure(HttpStatusCode.InternalServerError, ex.Message);
         }
     }
 
@@ -683,7 +854,15 @@ public class PaperlessClient
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(url, request, JsonOptions, cancellationToken).ConfigureAwait(false);
+            // Serialize against the runtime type explicitly. Empirically, posting via
+            // PostAsJsonAsync(...) or PatchAsync(JsonContent.Create(...)) on this client
+            // (with the configured DelegatingHandler + Polly retry pipeline) sent an
+            // empty body to Paperless even though the JsonContent's own
+            // ReadAsStringAsync returned the expected JSON. Materializing the body into
+            // a StringContent up front sidesteps that.
+            var jsonString = JsonSerializer.Serialize(request, request.GetType(), JsonOptions);
+            var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(url, content, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {
@@ -707,7 +886,12 @@ public class PaperlessClient
     {
         try
         {
-            var content = JsonContent.Create(request, options: JsonOptions);
+            // Same as PostWithResultAsync — explicit runtime-type serialization into
+            // StringContent. With JsonContent.Create(...) here the body reached
+            // Paperless empty (PATCH `{}` is a valid no-op so the row's modified
+            // timestamp updated but no fields actually changed).
+            var jsonString = JsonSerializer.Serialize(request, request.GetType(), JsonOptions);
+            var content = new StringContent(jsonString, System.Text.Encoding.UTF8, "application/json");
             var response = await _httpClient.PatchAsync(url, content, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)

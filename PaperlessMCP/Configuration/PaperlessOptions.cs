@@ -19,4 +19,10 @@ public class PaperlessOptions
     /// Maximum page size for paginated requests.
     /// </summary>
     public int MaxPageSize { get; set; } = 100;
+
+    /// <summary>
+    /// HTTP request timeout in seconds for calls to the Paperless-ngx API.
+    /// Large full-text searches over big libraries can exceed the default.
+    /// </summary>
+    public int HttpTimeoutSeconds { get; set; } = 30;
 }

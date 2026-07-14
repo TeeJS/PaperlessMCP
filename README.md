@@ -129,8 +129,8 @@ Restart Claude Desktop. Look for the tools icon — Paperless should be there.
 One command if you're already running the server somewhere:
 
 ```bash
-# Connect to a running HTTP/SSE server
-claude mcp add --transport sse paperless http://localhost:5000/mcp
+# Connect to a running Streamable HTTP server
+claude mcp add --transport http paperless http://localhost:5000/mcp
 ```
 
 Or run from source with stdio:
@@ -148,7 +148,36 @@ Verify it's there:
 claude mcp list
 ```
 
-### Option 4: Kubernetes
+### Option 4: LiteLLM Proxy
+
+LiteLLM 1.83.7 can register PaperlessMCP as a Streamable HTTP MCP server in `config.yaml`.
+
+Start PaperlessMCP first using Docker, Kubernetes, or source, then add it to LiteLLM:
+
+```yaml
+mcp_servers:
+  paperless:
+    url: "http://paperless-mcp:5000/mcp"
+    transport: "http"
+    description: "Paperless-ngx document management"
+```
+
+Use a URL that the LiteLLM process can reach. In Docker Compose, set the host to the PaperlessMCP service name from that Compose file, such as `paperless-mcp`. If LiteLLM runs directly on the host and PaperlessMCP publishes port 5000, use `http://127.0.0.1:5000/mcp`.
+
+Set `transport: "http"` explicitly for PaperlessMCP's `/mcp` endpoint. LiteLLM's MCP config defaults to `sse`, which is the wrong transport for this endpoint.
+
+`PAPERLESS_API_TOKEN` belongs on the PaperlessMCP service; it is the token PaperlessMCP uses when calling Paperless-ngx. PaperlessMCP does not require an inbound token on `/mcp` unless you put a separate auth layer, such as a reverse proxy, in front of it.
+
+For LiteLLM database-backed MCP storage, enable database storage in LiteLLM:
+
+```yaml
+general_settings:
+  store_model_in_db: true
+```
+
+For static configuration, keep the server under the top-level `mcp_servers` key.
+
+### Option 5: Kubernetes
 
 For the homelabbers running k8s. We include ready-to-use manifests with Kustomize support.
 
@@ -172,14 +201,14 @@ kubectl apply -k .
 
 Includes: Deployment, Service, Ingress, Kustomization. Tweak to taste.
 
-### Option 5: From Source
+### Option 6: From Source
 
 For contributors and tinkerers:
 
 ```bash
 git clone https://github.com/barryw/PaperlessMCP.git
 cd PaperlessMCP
-dotnet run --project PaperlessMCP             # HTTP/SSE on :5000
+dotnet run --project PaperlessMCP             # Streamable HTTP on :5000
 dotnet run --project PaperlessMCP -- --stdio  # stdio mode
 ```
 
@@ -300,10 +329,16 @@ Environment variables. That's it. No config files to manage.
 |----------|:--------:|---------|-------------|
 | `PAPERLESS_BASE_URL` | Yes | — | Your Paperless-ngx URL |
 | `PAPERLESS_API_TOKEN` | Yes | — | API token for authentication |
-| `MCP_PORT` | | `5000` | Port for HTTP/SSE mode |
+| `MCP_PORT` | | `5000` | Port for Streamable HTTP mode |
+| `MCP_RELAX_ACCEPT_HEADER` | | `false` | Normalize `/mcp` POST `Accept` headers for clients that cannot send both Streamable HTTP media types |
 | `MAX_PAGE_SIZE` | | `100` | Max items per paginated request |
+| `HTTP_TIMEOUT_SECONDS` | | `30` | Timeout for requests to Paperless-ngx. Raise it if large full-text searches time out |
 
 Aliases supported: `PAPERLESS_URL` and `PAPERLESS_TOKEN` also work if that's your style.
+
+### LocalAI Compatibility
+
+Streamable HTTP clients are expected to send `Accept: application/json, text/event-stream` on `/mcp` POST requests. Some clients cannot configure that header. Set `MCP_RELAX_ACCEPT_HEADER=true` to have PaperlessMCP normalize missing or incomplete `Accept` headers before the MCP SDK handles the request.
 
 ---
 
