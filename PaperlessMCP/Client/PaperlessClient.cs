@@ -454,11 +454,16 @@ public class PaperlessClient
 
         try
         {
-            var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
+            using var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
                 return (true, null);
+
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             return (false, $"HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -773,7 +778,7 @@ public class PaperlessClient
     /// <summary>
     /// Performs bulk operations on metadata objects (tags, correspondents, etc.).
     /// </summary>
-    public async Task<bool> BulkEditObjectsAsync(
+    public async Task<(bool Success, string? Error)> BulkEditObjectsAsync(
         int[] objectIds,
         string objectType,
         string operation,
@@ -799,13 +804,21 @@ public class PaperlessClient
 
         try
         {
-            var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            using var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return (false, $"HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to perform bulk object edit");
-            return false;
+            return (false, ex.Message);
         }
     }
 

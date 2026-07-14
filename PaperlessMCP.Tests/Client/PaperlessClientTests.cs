@@ -495,7 +495,7 @@ public class PaperlessClientTests : IDisposable
     #region Bulk Operations Tests
 
     [Fact]
-    public async Task BulkEditDocumentsAsync_WhenSuccessful_ReturnsTrue()
+    public async Task BulkEditDocumentsAsync_WhenSuccessful_ReturnsSuccessWithoutError()
     {
         // Arrange
         _factory.SetupPost("api/documents/bulk_edit/", "{}");
@@ -504,11 +504,43 @@ public class PaperlessClientTests : IDisposable
         var result = await _factory.Client.BulkEditDocumentsAsync([1, 2, 3], "add_tag", new { tag = 5 });
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
+        result.Error.Should().BeNull();
     }
 
     [Fact]
-    public async Task BulkEditObjectsAsync_WhenSuccessful_ReturnsTrue()
+    public async Task BulkEditDocumentsAsync_WhenHttpRequestFails_ReturnsResponseDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Invalid tag ID\"}";
+        _factory.SetupPostWithError("api/documents/bulk_edit/", HttpStatusCode.BadRequest, errorBody);
+
+        // Act
+        var result = await _factory.Client.BulkEditDocumentsAsync([1, 2, 3], "add_tag", new { tag = 999 });
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be($"HTTP 400: {errorBody}");
+    }
+
+    [Fact]
+    public async Task BulkEditDocumentsAsync_WhenTransportFails_ReturnsExceptionMessage()
+    {
+        // Arrange
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/documents/bulk_edit/")
+            .Throw(new HttpRequestException("network unavailable"));
+
+        // Act
+        var result = await _factory.Client.BulkEditDocumentsAsync([1], "reprocess");
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("network unavailable");
+    }
+
+    [Fact]
+    public async Task BulkEditObjectsAsync_WhenSuccessful_ReturnsSuccessWithoutError()
     {
         // Arrange
         _factory.SetupPost("api/bulk_edit_objects/", "{}");
@@ -517,7 +549,23 @@ public class PaperlessClientTests : IDisposable
         var result = await _factory.Client.BulkEditObjectsAsync([1, 2], "tags", "delete");
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
+        result.Error.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BulkEditObjectsAsync_WhenHttpRequestFails_ReturnsResponseDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Object is protected\"}";
+        _factory.SetupPostWithError("api/bulk_edit_objects/", HttpStatusCode.Conflict, errorBody);
+
+        // Act
+        var result = await _factory.Client.BulkEditObjectsAsync([1, 2], "tags", "delete");
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be($"HTTP 409: {errorBody}");
     }
 
     #endregion
