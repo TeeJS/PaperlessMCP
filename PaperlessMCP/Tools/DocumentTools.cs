@@ -30,13 +30,14 @@ public static class DocumentTools
         [Description("Filter by documents added before this date (YYYY-MM-DD)")] string? addedBefore = null,
         [Description("Filter by archive serial number")] int? archiveSerialNumber = null,
         [Description("Page number (default: 1)")] int page = 1,
-        [Description("Page size (default: 25, max: 100)")] int pageSize = 25,
+        [Description("Page size (default: 25, capped by MAX_PAGE_SIZE)")] int pageSize = 25,
         [Description("Ordering field (e.g., 'created', '-created', 'title')")] string? ordering = null,
-        [Description("Include document content in results (default: false). Use paperless.documents.get for full content.")] bool includeContent = false,
+        [Description("Include document content in results (default: false). Use paperless_documents_get for full content.")] bool includeContent = false,
         [Description("Max content length per document when includeContent=true (default: 500). Use 0 for unlimited.")] int contentMaxLength = 500)
     {
         var tagIds = ParseIntArray(tags);
         var tagExcludeIds = ParseIntArray(tagsExclude);
+        var effectivePageSize = client.GetEffectivePageSize(pageSize);
 
         DateTime? createdAfterDate = ParseDate(createdAfter);
         DateTime? createdBeforeDate = ParseDate(createdBefore);
@@ -56,7 +57,7 @@ public static class DocumentTools
             addedBefore: addedBeforeDate,
             archiveSerialNumber: archiveSerialNumber,
             page: page,
-            pageSize: Math.Min(pageSize, 100),
+            pageSize: effectivePageSize,
             ordering: ordering
         ).ConfigureAwait(false);
 
@@ -87,7 +88,7 @@ public static class DocumentTools
             new McpMeta
             {
                 Page = page,
-                PageSize = pageSize,
+                PageSize = effectivePageSize,
                 Total = result.Count,
                 Next = result.Next,
                 PaperlessBaseUrl = client.BaseUrl
@@ -203,7 +204,7 @@ public static class DocumentTools
     }
 
     [McpServerTool(Name = "paperless_documents_upload")]
-    [Description("Upload a new document to Paperless-ngx. Provide file content as base64. For large files, use paperless.documents.upload_from_path instead.")]
+    [Description("Upload a new document to Paperless-ngx. Provide file content as base64. For large files, use paperless_documents_upload_from_path instead.")]
     public static async Task<string> Upload(
         PaperlessClient client,
         [Description("Base64-encoded file content")] string fileContent,

@@ -40,6 +40,18 @@ public class PaperlessClient
 
     public string BaseUrl => _options.BaseUrl;
 
+    /// <summary>
+    /// Normalizes a requested page size to the configured positive upper bound.
+    /// </summary>
+    public int GetEffectivePageSize(int? requestedPageSize = null)
+    {
+        var maxPageSize = _options.MaxPageSize > 0
+            ? _options.MaxPageSize
+            : PaperlessOptions.DefaultMaxPageSize;
+
+        return Math.Clamp(requestedPageSize ?? maxPageSize, 1, maxPageSize);
+    }
+
     #region Health & Status
 
     /// <summary>
@@ -197,7 +209,7 @@ public class PaperlessClient
             queryParams["archive_serial_number"] = archiveSerialNumber.Value.ToString();
 
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
 
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
@@ -488,7 +500,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -542,7 +554,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -578,7 +590,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -614,7 +626,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -650,7 +662,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
 
         return await GetAsync<PaginatedResult<CustomField>>($"api/custom_fields/?{queryParams}", cancellationToken).ConfigureAwait(false)
                ?? new PaginatedResult<CustomField>();
