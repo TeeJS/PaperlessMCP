@@ -115,8 +115,19 @@ public static class TagTools
         [Description("Match pattern (optional)")] string? match = null,
         [Description("Matching algorithm (optional)")] int? matchingAlgorithm = null,
         [Description("Is inbox tag (optional)")] bool? isInboxTag = null,
-        [Description("Parent tag ID for hierarchical tags (optional)")] int? parent = null)
+        [Description("Parent tag ID. Omit to leave the parent unchanged.")] int? parent = null,
+        [Description("Set true to move the tag to the root level. Cannot be combined with parent.")] bool clearParent = false)
     {
+        if (parent.HasValue && clearParent)
+        {
+            var errorResponse = McpErrorResponse.Create(
+                ErrorCodes.Validation,
+                "parent and clear_parent cannot be used together",
+                meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+            );
+            return JsonSerializer.Serialize(errorResponse);
+        }
+
         var request = new TagUpdateRequest
         {
             Name = name,
@@ -124,7 +135,11 @@ public static class TagTools
             Match = match,
             MatchingAlgorithm = matchingAlgorithm,
             IsInboxTag = isInboxTag,
-            Parent = parent
+            Parent = clearParent
+                ? TagParentUpdate.Clear
+                : parent.HasValue
+                    ? TagParentUpdate.Set(parent.Value)
+                    : default
         };
 
         var tag = await client.UpdateTagAsync(id, request).ConfigureAwait(false);
