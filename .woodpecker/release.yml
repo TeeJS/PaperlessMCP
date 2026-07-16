@@ -107,6 +107,9 @@ steps:
         # Update version.json
         echo "{\"version\": \"$NEW_VERSION\"}" > version.json
 
+        # Keep the csproj <Version> literal in sync with the release
+        sed -i "s|<Version>[^<]*</Version>|<Version>$NEW_VERSION</Version>|" PaperlessMCP/PaperlessMCP.csproj
+
         cat .version
         cat .tag
 
@@ -197,8 +200,8 @@ steps:
         git config user.name "Woodpecker CI"
         git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/barryw/PaperlessMCP.git"
 
-        # Commit version.json update
-        git add version.json
+        # Commit version.json + csproj version update
+        git add version.json PaperlessMCP/PaperlessMCP.csproj
         git diff --staged --quiet || git commit -m "chore(release): bump version to $VERSION [skip ci]"
         git push origin HEAD:main
 

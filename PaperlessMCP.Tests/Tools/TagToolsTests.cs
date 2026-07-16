@@ -105,6 +105,30 @@ public class TagToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_WithParent_ReturnsCreatedTagWithParent()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Post, "https://paperless.example.com/api/tags/")
+            .With(request =>
+            {
+                capturedBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Tags.CreateTagJson(5, "Child Tag", parent: 1));
+
+        // Act
+        var result = await TagTools.Create(_factory.Client, "Child Tag", parent: 1);
+
+        // Assert
+        capturedBody.Should().Contain("\"parent\":1");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result").GetProperty("parent").GetInt32().Should().Be(1);
+    }
+
+    [Fact]
     public async Task Create_WhenFails_ReturnsError()
     {
         // Arrange
@@ -176,6 +200,90 @@ public class TagToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Update_WithoutParent_OmitsParentField()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/tags/1/")
+            .With(request =>
+            {
+                capturedBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Tags.CreateTagJson(1, "Updated Child", parent: 2));
+
+        // Act
+        var result = await TagTools.Update(_factory.Client, 1, name: "Updated Child");
+
+        // Assert
+        capturedBody.Should().NotContain("\"parent\"");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result").GetProperty("parent").GetInt32().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Update_WithParent_SendsParentId()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/tags/1/")
+            .With(request =>
+            {
+                capturedBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Tags.CreateTagJson(1, "Child Tag", parent: 2));
+
+        // Act
+        var result = await TagTools.Update(_factory.Client, 1, parent: 2);
+
+        // Assert
+        capturedBody.Should().Contain("\"parent\":2");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result").GetProperty("parent").GetInt32().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Update_WithClearParent_SendsExplicitNull()
+    {
+        // Arrange
+        string? capturedBody = null;
+        _factory.MockHandler
+            .When(HttpMethod.Patch, "https://paperless.example.com/api/tags/1/")
+            .With(request =>
+            {
+                capturedBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond("application/json", TestFixtures.Tags.CreateTagJson(1, "Root Tag"));
+
+        // Act
+        var result = await TagTools.Update(_factory.Client, 1, clearParent: true);
+
+        // Assert
+        capturedBody.Should().Contain("\"parent\":null");
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("result").GetProperty("parent").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Update_WithParentAndClearParent_ReturnsValidationError()
+    {
+        // Act
+        var result = await TagTools.Update(_factory.Client, 1, parent: 2, clearParent: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("VALIDATION");
+    }
+
+    [Fact]
     public async Task Delete_WithoutConfirmation_ReturnsDryRun()
     {
         // Arrange
@@ -231,6 +339,23 @@ public class TagToolsTests : IDisposable
         var json = JsonDocument.Parse(result);
         json.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
         json.RootElement.GetProperty("result").GetProperty("executed").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task BulkDelete_WhenUpstreamFails_ReturnsErrorDetails()
+    {
+        // Arrange
+        const string errorBody = "{\"detail\":\"Object is protected\"}";
+        _factory.SetupPostWithError("api/bulk_edit_objects/", HttpStatusCode.Conflict, errorBody);
+
+        // Act
+        var result = await TagTools.BulkDelete(_factory.Client, "1,2,3", dryRun: false, confirm: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.RootElement.GetProperty("error").GetProperty("message").GetString()
+            .Should().Contain("HTTP 409").And.Contain("Object is protected");
     }
 
     [Fact]

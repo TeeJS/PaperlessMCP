@@ -74,7 +74,7 @@ public static class TestFixtures
 
     public static class Tags
     {
-        public static Tag CreateTag(int id = 1, string name = "Test Tag") => new()
+        public static Tag CreateTag(int id = 1, string name = "Test Tag", int? parent = null) => new()
         {
             Id = id,
             Slug = name.ToLower().Replace(" ", "-"),
@@ -85,7 +85,8 @@ public static class TestFixtures
             MatchingAlgorithm = 0,
             IsInboxTag = false,
             DocumentCount = 5,
-            Owner = 1
+            Owner = 1,
+            Parent = parent
         };
 
         public static PaginatedResult<Tag> CreateTagList(int count = 3) => new()
@@ -98,8 +99,8 @@ public static class TestFixtures
                 .ToList()
         };
 
-        public static string CreateTagJson(int id = 1, string name = "Test Tag") =>
-            JsonSerializer.Serialize(CreateTag(id, name));
+        public static string CreateTagJson(int id = 1, string name = "Test Tag", int? parent = null) =>
+            JsonSerializer.Serialize(CreateTag(id, name, parent));
 
         public static string CreateTagListJson(int count = 3) =>
             JsonSerializer.Serialize(CreateTagList(count));
@@ -204,7 +205,16 @@ public static class TestFixtures
             Id = id,
             Name = name,
             DataType = dataType,
-            ExtraData = dataType == "select" ? new CustomFieldExtraData { SelectOptions = ["Option 1", "Option 2"] } : null
+            ExtraData = dataType == "select"
+                ? new CustomFieldExtraData
+                {
+                    SelectOptions =
+                    [
+                        new SelectOption { Id = "option-1", Label = "Option 1" },
+                        new SelectOption { Id = "option-2", Label = "Option 2" }
+                    ]
+                }
+                : null
         };
 
         public static PaginatedResult<CustomField> CreateCustomFieldList(int count = 3) => new()

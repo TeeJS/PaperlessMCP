@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PaperlessMCP.Models.CustomFields;
@@ -21,12 +22,84 @@ public record CustomField
 }
 
 /// <summary>
+/// A single option in a select-type custom field.
+///
+/// Paperless-ngx v2.14+ requires each option serialised as
+/// {"label": "..."} rather than a bare string. The old bare-string
+/// form makes paperless's serialisers.py raise
+/// "'str' object has no attribute 'get'", surfaced as a generic
+/// UPSTREAM_ERROR / 400 through this MCP.
+/// </summary>
+[JsonConverter(typeof(SelectOptionJsonConverter))]
+public record SelectOption
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    [JsonPropertyName("label")]
+    public required string Label { get; init; }
+}
+
+/// <summary>
+/// Accepts both the string options returned by Paperless-ngx before v2.14 and
+/// the object options returned by v2.14 and later. Responses are normalized to
+/// the object shape so option IDs remain available to MCP clients.
+/// </summary>
+public sealed class SelectOptionJsonConverter : JsonConverter<SelectOption>
+{
+    public override SelectOption Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            return new SelectOption { Label = reader.GetString() ?? string.Empty };
+        }
+
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException("Select option must be a string or an object.");
+        }
+
+        using var document = JsonDocument.ParseValue(ref reader);
+        var root = document.RootElement;
+
+        if (!root.TryGetProperty("label", out var labelElement) || labelElement.ValueKind != JsonValueKind.String)
+        {
+            throw new JsonException("Select option object must contain a string label.");
+        }
+
+        string? id = null;
+        if (root.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+        {
+            id = idElement.GetString();
+        }
+
+        return new SelectOption
+        {
+            Id = id,
+            Label = labelElement.GetString() ?? string.Empty
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, SelectOption value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        if (value.Id != null)
+        {
+            writer.WriteString("id", value.Id);
+        }
+
+        writer.WriteString("label", value.Label);
+        writer.WriteEndObject();
+    }
+}
+
+/// <summary>
 /// Extra data for select-type custom fields.
 /// </summary>
 public record CustomFieldExtraData
 {
     [JsonPropertyName("select_options")]
-    public List<string>? SelectOptions { get; init; }
+    public List<SelectOption>? SelectOptions { get; init; }
 
     [JsonPropertyName("default_currency")]
     public string? DefaultCurrency { get; init; }

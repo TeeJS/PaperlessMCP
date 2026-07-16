@@ -19,17 +19,18 @@ public static class DocumentTypeTools
     public static async Task<string> List(
         PaperlessClient client,
         [Description("Page number (default: 1)")] int page = 1,
-        [Description("Page size (default: 25, max: 100)")] int pageSize = 25,
+        [Description("Page size (default: 25, capped by MAX_PAGE_SIZE)")] int pageSize = 25,
         [Description("Ordering field (e.g., 'name', '-document_count')")] string? ordering = null)
     {
-        var result = await client.GetDocumentTypesAsync(page, Math.Min(pageSize, 100), ordering).ConfigureAwait(false);
+        var effectivePageSize = client.GetEffectivePageSize(pageSize);
+        var result = await client.GetDocumentTypesAsync(page, effectivePageSize, ordering).ConfigureAwait(false);
 
         var response = McpResponse<object>.Success(
             result.Results,
             new McpMeta
             {
                 Page = page,
-                PageSize = pageSize,
+                PageSize = effectivePageSize,
                 Total = result.Count,
                 Next = result.Next,
                 PaperlessBaseUrl = client.BaseUrl
@@ -220,13 +221,13 @@ public static class DocumentTypeTools
             return JsonSerializer.Serialize(dryRunResponse);
         }
 
-        var success = await client.BulkEditObjectsAsync(ids, "document_types", "delete").ConfigureAwait(false);
+        var (success, bulkError) = await client.BulkEditObjectsAsync(ids, "document_types", "delete").ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                "Bulk delete operation failed",
+                $"Bulk delete operation failed: {bulkError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);
