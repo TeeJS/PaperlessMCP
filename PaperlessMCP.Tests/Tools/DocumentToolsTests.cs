@@ -521,6 +521,56 @@ public class DocumentToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Update_ByDefault_OmitsContentToSaveTokens()
+    {
+        // Arrange - fixture document carries full OCR content
+        _factory.SetupPatch("api/documents/1/", TestFixtures.Documents.CreateDocumentJson(1, "Updated Title"));
+
+        // Act - default call (no includeContent)
+        var result = await DocumentTools.Update(_factory.Client, 1, title: "Updated Title");
+
+        // Assert - metadata present, content suppressed
+        var json = JsonDocument.Parse(result);
+        var resultElement = json.RootElement.GetProperty("result");
+        resultElement.GetProperty("title").GetString().Should().Be("Updated Title");
+
+        var hasContent = resultElement.TryGetProperty("content", out var content);
+        (hasContent == false || string.IsNullOrEmpty(content.GetString()))
+            .Should().BeTrue("update responses should not echo the full OCR content by default");
+    }
+
+    [Fact]
+    public async Task Update_WithIncludeContent_ReturnsFullContent()
+    {
+        // Arrange
+        _factory.SetupPatch("api/documents/1/", TestFixtures.Documents.CreateDocumentJson(1, "Updated Title"));
+
+        // Act
+        var result = await DocumentTools.Update(_factory.Client, 1, title: "Updated Title", includeContent: true);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("result").GetProperty("content").GetString()
+            .Should().Be("This is test content for the document.");
+    }
+
+    [Fact]
+    public async Task Update_WithIncludeContentAndMaxLength_TruncatesContent()
+    {
+        // Arrange
+        _factory.SetupPatch("api/documents/1/", TestFixtures.Documents.CreateDocumentJson(1, "Updated Title"));
+
+        // Act - contentMaxLength only applies once content is opted in
+        var result = await DocumentTools.Update(
+            _factory.Client, 1, title: "Updated Title", includeContent: true, contentMaxLength: 10);
+
+        // Assert
+        var json = JsonDocument.Parse(result);
+        json.RootElement.GetProperty("result").GetProperty("content").GetString()
+            .Should().Be("This is te...");
+    }
+
+    [Fact]
     public async Task Update_WhenNotFound_ReturnsError()
     {
         // Arrange
