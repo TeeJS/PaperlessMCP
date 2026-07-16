@@ -362,7 +362,8 @@ public static class DocumentTools
         [Description("Document type by NAME (optional; exact, case-insensitive; resolved server-side; never creates)")] string? documentTypeName = null,
         [Description("Correspondent by NAME (optional; exact, case-insensitive; resolved server-side; never creates)")] string? correspondentName = null,
         [Description("Include the updated document's notes (default: false). Notes can be very large and are not needed for filing/triage.")] bool includeNotes = false,
-        [Description("Max characters of OCR content to return (default: 0 = unlimited).")] int contentMaxLength = 0)
+        [Description("Include the updated document's OCR content (default: false). A metadata write has no reason to echo the body back; use paperless_documents_get to read content.")] bool includeContent = false,
+        [Description("Max characters of OCR content to return when includeContent=true (default: 0 = unlimited).")] int contentMaxLength = 0)
     {
         string ValidationError(string message, object? details = null) =>
             JsonSerializer.Serialize(McpErrorResponse.Create(
@@ -418,13 +419,18 @@ public static class DocumentTools
         // Trim oversized fields before returning: a document's notes can be enormous
         // (AI-OCR duplicates the body as markdown) and overflow the result limit, which
         // makes a successful PATCH look like a failure. Mirrors documents_get.
+        // Content is dropped by default for the same reason at smaller scale -- a metadata
+        // write has no reason to echo the OCR body back, and callers that need it have
+        // already read it via documents_get. contentMaxLength still caps it when opted in.
         var doc = result.Value!;
         var updated = doc with
         {
             Notes = includeNotes ? doc.Notes : null,
-            Content = (contentMaxLength > 0 && doc.Content.Length > contentMaxLength)
-                ? doc.Content[..contentMaxLength] + "..."
-                : doc.Content,
+            Content = !includeContent
+                ? string.Empty
+                : (contentMaxLength > 0 && doc.Content.Length > contentMaxLength)
+                    ? doc.Content[..contentMaxLength] + "..."
+                    : doc.Content,
         };
 
         var response = McpResponse<Document>.Success(
