@@ -90,13 +90,15 @@ jobs:
           args=()
           while IFS= read -r t; do [ -n "$t" ] && args+=(--tag "$t"); done <<< "$TAGS"
           while IFS= read -r l; do [ -n "$l" ] && args+=(--label "$l"); done <<< "$LABELS"
-          [ "$PUSH" = "true" ] && args+=(--push)
+          # Docker media types (not OCI) so Unraid's update check can read the manifest
+          [ "$PUSH" = "true" ] && args+=(--output "type=image,oci-mediatypes=false,push=true")
 
           for attempt in 1 2 3 4; do
             echo "::group::docker buildx build (attempt $attempt)"
             if docker buildx build \
                  --file ./PaperlessMCP/Dockerfile \
                  --build-arg "VERSION=$VERSION" \
+                 --provenance=false \
                  "${args[@]}" \
                  ./PaperlessMCP; then
               echo "::endgroup::"
