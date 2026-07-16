@@ -30,20 +30,21 @@ public static class DocumentTools
         [Description("Filter by documents added before this date (YYYY-MM-DD)")] string? addedBefore = null,
         [Description("Filter by archive serial number")] int? archiveSerialNumber = null,
         [Description("Page number (default: 1)")] int page = 1,
-        [Description("Page size (default: 25, max: 100)")] int pageSize = 25,
+        [Description("Page size (default: 25, capped by MAX_PAGE_SIZE)")] int pageSize = 25,
         [Description("Ordering field (e.g., 'created', '-created', 'title')")] string? ordering = null,
-        [Description("Include document content in results (default: false). Use paperless.documents.get for full content.")] bool includeContent = false,
+        [Description("Include document content in results (default: false). Use paperless_documents_get for full content.")] bool includeContent = false,
         [Description("Max content length per document when includeContent=true (default: 500). Use 0 for unlimited.")] int contentMaxLength = 500)
     {
         var tagIds = ParseIntArray(tags);
         var tagExcludeIds = ParseIntArray(tagsExclude);
+        var effectivePageSize = client.GetEffectivePageSize(pageSize);
 
         DateTime? createdAfterDate = ParseDate(createdAfter);
         DateTime? createdBeforeDate = ParseDate(createdBefore);
         DateTime? addedAfterDate = ParseDate(addedAfter);
         DateTime? addedBeforeDate = ParseDate(addedBefore);
 
-        var result = await client.SearchDocumentsAsync(
+        var searchResult = await client.SearchDocumentsWithResultAsync(
             query: query,
             tags: tagIds,
             tagsExclude: tagExcludeIds,
@@ -56,9 +57,23 @@ public static class DocumentTools
             addedBefore: addedBeforeDate,
             archiveSerialNumber: archiveSerialNumber,
             page: page,
-            pageSize: Math.Min(pageSize, 100),
+            pageSize: effectivePageSize,
             ordering: ordering
         ).ConfigureAwait(false);
+
+        if (!searchResult.IsSuccess)
+        {
+            var error = searchResult.Error!;
+            var errorResponse = McpErrorResponse.Create(
+                ErrorCodes.UpstreamError,
+                $"Failed to search documents: {error.Message}",
+                new { status_code = (int)error.StatusCode },
+                new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+            );
+            return JsonSerializer.Serialize(errorResponse);
+        }
+
+        var result = searchResult.Value!;
 
         // Map to lightweight summaries to reduce response size
         var summaries = result.Results
@@ -73,7 +88,7 @@ public static class DocumentTools
             new McpMeta
             {
                 Page = page,
-                PageSize = pageSize,
+                PageSize = effectivePageSize,
                 Total = result.Count,
                 Next = result.Next,
                 PaperlessBaseUrl = client.BaseUrl
@@ -201,7 +216,7 @@ public static class DocumentTools
     }
 
     [McpServerTool(Name = "paperless_documents_upload")]
-    [Description("Upload a new document to Paperless-ngx. Provide file content as base64. For large files, use paperless.documents.upload_from_path instead.")]
+    [Description("Upload a new document to Paperless-ngx. Provide file content as base64. For large files, use paperless_documents_upload_from_path instead.")]
     public static async Task<string> Upload(
         PaperlessClient client,
         [Description("Base64-encoded file content")] string fileContent,
@@ -658,13 +673,13 @@ public static class DocumentTools
             _ => null
         };
 
-        var success = await client.BulkEditDocumentsAsync(ids, operation, parameters).ConfigureAwait(false);
+        var (success, bulkError) = await client.BulkEditDocumentsAsync(ids, operation, parameters).ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                "Bulk operation failed",
+                $"Bulk operation failed: {bulkError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);
@@ -713,13 +728,13 @@ public static class DocumentTools
             return JsonSerializer.Serialize(dryRunResponse);
         }
 
-        var success = await client.BulkEditDocumentsAsync(new[] { id }, "reprocess").ConfigureAwait(false);
+        var (success, reprocessError) = await client.BulkEditDocumentsAsync(new[] { id }, "reprocess").ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                $"Failed to reprocess document with ID {id}",
+                $"Failed to reprocess document with ID {id}: {reprocessError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);

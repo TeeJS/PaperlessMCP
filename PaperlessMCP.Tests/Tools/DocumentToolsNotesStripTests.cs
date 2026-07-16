@@ -29,7 +29,7 @@ public class DocumentToolsNotesStripTests : IDisposable
             Content = content,
             Notes = new List<DocumentNote>
             {
-                new() { Id = 1, Note = NoteMarker, Created = DateTime.UtcNow, User = 7 }
+                new() { Id = 1, Note = NoteMarker, Created = DateTime.UtcNow, User = new DocumentNoteUser { Id = 7 } }
             }
         });
 

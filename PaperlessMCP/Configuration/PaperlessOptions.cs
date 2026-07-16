@@ -5,6 +5,8 @@ namespace PaperlessMCP.Configuration;
 /// </summary>
 public class PaperlessOptions
 {
+    public const int DefaultMaxPageSize = 100;
+
     /// <summary>
     /// Base URL of the Paperless-ngx instance (e.g., https://docs.example.com).
     /// </summary>
@@ -18,5 +20,11 @@ public class PaperlessOptions
     /// <summary>
     /// Maximum page size for paginated requests.
     /// </summary>
-    public int MaxPageSize { get; set; } = 100;
+    public int MaxPageSize { get; set; } = DefaultMaxPageSize;
+
+    /// <summary>
+    /// HTTP request timeout in seconds for calls to the Paperless-ngx API.
+    /// Large full-text searches over big libraries can exceed the default.
+    /// </summary>
+    public int HttpTimeoutSeconds { get; set; } = 30;
 }

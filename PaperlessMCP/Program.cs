@@ -99,9 +99,18 @@ void ConfigureServices(IServiceCollection services, IConfiguration configuration
                            ?? configuration.GetValue<string>("Paperless:ApiToken")
                            ?? throw new InvalidOperationException("PAPERLESS_API_TOKEN or PAPERLESS_TOKEN is required");
 
-        options.MaxPageSize = Environment.GetEnvironmentVariable("MAX_PAGE_SIZE") is string maxPageStr && int.TryParse(maxPageStr, out var maxPage)
-            ? maxPage
-            : configuration.GetValue<int?>("Paperless:MaxPageSize") ?? 100;
+        var configuredMaxPageSize = configuration.GetValue<int?>("Paperless:MaxPageSize")
+                                    ?? PaperlessOptions.DefaultMaxPageSize;
+        var fallbackMaxPageSize = configuredMaxPageSize > 0
+            ? configuredMaxPageSize
+            : PaperlessOptions.DefaultMaxPageSize;
+        options.MaxPageSize = ParsingHelpers.ParsePositiveInt(
+            Environment.GetEnvironmentVariable("MAX_PAGE_SIZE"),
+            fallbackMaxPageSize);
+
+        options.HttpTimeoutSeconds = ParsingHelpers.ParsePositiveInt(
+            Environment.GetEnvironmentVariable("HTTP_TIMEOUT_SECONDS"),
+            configuration.GetValue<int?>("Paperless:HttpTimeoutSeconds") ?? 30);
     });
 
     // Configure retry policy for transient errors
@@ -116,7 +125,7 @@ void ConfigureServices(IServiceCollection services, IConfiguration configuration
         var options = sp.GetRequiredService<IOptions<PaperlessOptions>>().Value;
         client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
         client.DefaultRequestHeaders.Add("Accept", "application/json; version=9");
-        client.Timeout = TimeSpan.FromSeconds(30);
+        client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
     })
     .AddHttpMessageHandler<PaperlessAuthHandler>()
     .AddPolicyHandler(retryPolicy);

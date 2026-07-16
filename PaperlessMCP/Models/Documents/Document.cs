@@ -87,47 +87,96 @@ public record DocumentNote
     public DateTime Created { get; init; }
 
     [JsonPropertyName("user")]
-    [JsonConverter(typeof(FlexibleUserIdConverter))]
-    public int? User { get; init; }
+    public DocumentNoteUser? User { get; init; }
 }
 
 /// <summary>
-/// Reads a "user" field that Paperless-ngx may serialize either as a bare user
-/// id (older API) or as an expanded user object {"id": N, ...} (Paperless 2.x).
-/// In both cases the user id is returned; anything else yields null. This keeps
-/// the model tolerant of API version drift instead of failing the whole
-/// deserialization (which the client would otherwise swallow into an empty result).
+/// User attached to a document note. Paperless API v8+ returns an object,
+/// while older API versions return only the numeric user ID.
 /// </summary>
-public class FlexibleUserIdConverter : JsonConverter<int?>
+[JsonConverter(typeof(DocumentNoteUserJsonConverter))]
+public record DocumentNoteUser
 {
-    public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    [JsonPropertyName("id")]
+    public int Id { get; init; }
+
+    [JsonPropertyName("username")]
+    public string Username { get; init; } = string.Empty;
+
+    [JsonPropertyName("first_name")]
+    public string FirstName { get; init; } = string.Empty;
+
+    [JsonPropertyName("last_name")]
+    public string LastName { get; init; } = string.Empty;
+
+    internal bool IsLegacyIdOnly { get; init; }
+}
+
+/// <summary>
+/// Reads both Paperless note-user response shapes and preserves their shape
+/// when the model is serialized again.
+/// </summary>
+public sealed class DocumentNoteUserJsonConverter : JsonConverter<DocumentNoteUser>
+{
+    public override DocumentNoteUser Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options)
     {
-        switch (reader.TokenType)
+        if (reader.TokenType == JsonTokenType.Number)
         {
-            case JsonTokenType.Null:
-                return null;
-            case JsonTokenType.Number:
-                return reader.GetInt32();
-            case JsonTokenType.StartObject:
-                using (var doc = JsonDocument.ParseValue(ref reader))
-                {
-                    return doc.RootElement.TryGetProperty("id", out var idProp)
-                           && idProp.TryGetInt32(out var id)
-                        ? id
-                        : null;
-                }
-            default:
-                reader.Skip();
-                return null;
+            return new DocumentNoteUser
+            {
+                Id = reader.GetInt32(),
+                IsLegacyIdOnly = true
+            };
         }
+
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException("Document note user must be a numeric ID or an object.");
+        }
+
+        using var document = JsonDocument.ParseValue(ref reader);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("id", out var idElement) || !idElement.TryGetInt32(out var id))
+        {
+            throw new JsonException("Document note user object must contain a numeric ID.");
+        }
+
+        return new DocumentNoteUser
+        {
+            Id = id,
+            Username = GetString(root, "username"),
+            FirstName = GetString(root, "first_name"),
+            LastName = GetString(root, "last_name")
+        };
     }
 
-    public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
+    public override void Write(
+        Utf8JsonWriter writer,
+        DocumentNoteUser value,
+        JsonSerializerOptions options)
     {
-        if (value.HasValue)
-            writer.WriteNumberValue(value.Value);
-        else
-            writer.WriteNullValue();
+        if (value.IsLegacyIdOnly)
+        {
+            writer.WriteNumberValue(value.Id);
+            return;
+        }
+
+        writer.WriteStartObject();
+        writer.WriteNumber("id", value.Id);
+        writer.WriteString("username", value.Username);
+        writer.WriteString("first_name", value.FirstName);
+        writer.WriteString("last_name", value.LastName);
+        writer.WriteEndObject();
+    }
+
+    private static string GetString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString() ?? string.Empty
+            : string.Empty;
     }
 }
 

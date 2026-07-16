@@ -40,6 +40,18 @@ public class PaperlessClient
 
     public string BaseUrl => _options.BaseUrl;
 
+    /// <summary>
+    /// Normalizes a requested page size to the configured positive upper bound.
+    /// </summary>
+    public int GetEffectivePageSize(int? requestedPageSize = null)
+    {
+        var maxPageSize = _options.MaxPageSize > 0
+            ? _options.MaxPageSize
+            : PaperlessOptions.DefaultMaxPageSize;
+
+        return Math.Clamp(requestedPageSize ?? maxPageSize, 1, maxPageSize);
+    }
+
     #region Health & Status
 
     /// <summary>
@@ -120,6 +132,45 @@ public class PaperlessClient
         string? ordering = null,
         CancellationToken cancellationToken = default)
     {
+        var result = await SearchDocumentsWithResultAsync(
+            query,
+            tags,
+            tagsExclude,
+            correspondent,
+            documentType,
+            storagePath,
+            createdAfter,
+            createdBefore,
+            addedAfter,
+            addedBefore,
+            archiveSerialNumber,
+            page,
+            pageSize,
+            ordering,
+            cancellationToken).ConfigureAwait(false);
+
+        return result.IsSuccess && result.Value != null
+            ? result.Value
+            : new PaginatedResult<DocumentSearchResult>();
+    }
+
+    internal async Task<ApiResult<PaginatedResult<DocumentSearchResult>>> SearchDocumentsWithResultAsync(
+        string? query = null,
+        int[]? tags = null,
+        int[]? tagsExclude = null,
+        int? correspondent = null,
+        int? documentType = null,
+        int? storagePath = null,
+        DateTime? createdAfter = null,
+        DateTime? createdBefore = null,
+        DateTime? addedAfter = null,
+        DateTime? addedBefore = null,
+        int? archiveSerialNumber = null,
+        int page = 1,
+        int? pageSize = null,
+        string? ordering = null,
+        CancellationToken cancellationToken = default)
+    {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
 
         if (!string.IsNullOrEmpty(query))
@@ -158,14 +209,13 @@ public class PaperlessClient
             queryParams["archive_serial_number"] = archiveSerialNumber.Value.ToString();
 
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
 
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
         var url = $"api/documents/?{queryParams}";
-        return await GetAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false)
-               ?? new PaginatedResult<DocumentSearchResult>();
+        return await GetWithResultAsync<PaginatedResult<DocumentSearchResult>>(url, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -391,7 +441,7 @@ public class PaperlessClient
     /// <summary>
     /// Performs bulk edit operations on documents.
     /// </summary>
-    public async Task<bool> BulkEditDocumentsAsync(
+    public async Task<(bool Success, string? Error)> BulkEditDocumentsAsync(
         int[] documentIds,
         string method,
         object? parameters = null,
@@ -416,13 +466,21 @@ public class PaperlessClient
 
         try
         {
-            var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            using var response = await _httpClient.PostAsync("api/documents/bulk_edit/", content, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return (false, $"HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to perform bulk edit");
-            return false;
+            return (false, ex.Message);
         }
     }
 
@@ -442,7 +500,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -496,7 +554,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -532,7 +590,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -626,7 +684,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
         if (!string.IsNullOrEmpty(ordering))
             queryParams["ordering"] = ordering;
 
@@ -662,7 +720,7 @@ public class PaperlessClient
     {
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["page"] = page.ToString();
-        queryParams["page_size"] = (pageSize ?? _options.MaxPageSize).ToString();
+        queryParams["page_size"] = GetEffectivePageSize(pageSize).ToString();
 
         return await GetAsync<PaginatedResult<CustomField>>($"api/custom_fields/?{queryParams}", cancellationToken).ConfigureAwait(false)
                ?? new PaginatedResult<CustomField>();
@@ -673,19 +731,114 @@ public class PaperlessClient
         return await GetAsync<CustomField>($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<CustomField?> CreateCustomFieldAsync(CustomFieldCreateRequest request, CancellationToken cancellationToken = default)
+    private async Task<bool> UsesLegacySelectOptionFormatAsync(CancellationToken cancellationToken = default)
     {
-        return await PostAsync<CustomField>("api/custom_fields/", request, cancellationToken).ConfigureAwait(false);
+        var (success, version, _) = await PingAsync(cancellationToken).ConfigureAwait(false);
+        return success && UsesLegacySelectOptionFormat(version);
     }
 
-    public async Task<CustomField?> UpdateCustomFieldAsync(int id, CustomFieldUpdateRequest request, CancellationToken cancellationToken = default)
+    internal static bool UsesLegacySelectOptionFormat(string? version)
     {
-        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", request, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var parts = version.Trim().TrimStart('v', 'V').Split('.');
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var major) || !int.TryParse(parts[1], out var minor))
+        {
+            return false;
+        }
+
+        return major < 2 || major == 2 && minor < 14;
+    }
+
+    public async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await CreateCustomFieldAsync(request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> CreateCustomFieldAsync(
+        CustomFieldCreateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldCreateRequest
+            {
+                Name = request.Name,
+                DataType = request.DataType,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PostAsync<CustomField>("api/custom_fields/", wireRequest, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var useLegacySelectOptions = request.ExtraData?.SelectOptions != null
+                                     && await UsesLegacySelectOptionFormatAsync(cancellationToken).ConfigureAwait(false);
+        return await UpdateCustomFieldAsync(id, request, useLegacySelectOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CustomField?> UpdateCustomFieldAsync(
+        int id,
+        CustomFieldUpdateRequest request,
+        bool useLegacySelectOptions,
+        CancellationToken cancellationToken = default)
+    {
+        object wireRequest = useLegacySelectOptions
+            ? new LegacyCustomFieldUpdateRequest
+            {
+                Name = request.Name,
+                ExtraData = ToLegacyExtraData(request.ExtraData)
+            }
+            : request;
+
+        return await PatchAsync<CustomField>($"api/custom_fields/{id}/", wireRequest, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteCustomFieldAsync(int id, CancellationToken cancellationToken = default)
     {
         return await DeleteAsync($"api/custom_fields/{id}/", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static LegacyCustomFieldExtraData? ToLegacyExtraData(CustomFieldExtraData? extraData)
+    {
+        return extraData == null
+            ? null
+            : new LegacyCustomFieldExtraData
+            {
+                SelectOptions = extraData.SelectOptions?.Select(option => option.Label).ToList(),
+                DefaultCurrency = extraData.DefaultCurrency
+            };
+    }
+
+    private sealed record LegacyCustomFieldExtraData
+    {
+        public List<string>? SelectOptions { get; init; }
+        public string? DefaultCurrency { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldCreateRequest
+    {
+        public required string Name { get; init; }
+        public required string DataType { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
+    }
+
+    private sealed record LegacyCustomFieldUpdateRequest
+    {
+        public string? Name { get; init; }
+        public LegacyCustomFieldExtraData? ExtraData { get; init; }
     }
 
     #endregion
@@ -695,7 +848,7 @@ public class PaperlessClient
     /// <summary>
     /// Performs bulk operations on metadata objects (tags, correspondents, etc.).
     /// </summary>
-    public async Task<bool> BulkEditObjectsAsync(
+    public async Task<(bool Success, string? Error)> BulkEditObjectsAsync(
         int[] objectIds,
         string objectType,
         string operation,
@@ -721,13 +874,21 @@ public class PaperlessClient
 
         try
         {
-            var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            using var response = await _httpClient.PostAsync("api/bulk_edit_objects/", content, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return (false, $"HTTP {(int)response.StatusCode}: {errorBody}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to perform bulk object edit");
-            return false;
+            return (false, ex.Message);
         }
     }
 
@@ -737,22 +898,41 @@ public class PaperlessClient
 
     private async Task<T?> GetAsync<T>(string url, CancellationToken cancellationToken)
     {
+        var result = await GetWithResultAsync<T>(url, cancellationToken).ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : default;
+    }
+
+    private async Task<ApiResult<T>> GetWithResultAsync<T>(string url, CancellationToken cancellationToken)
+    {
         try
         {
             var response = await _httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
 
             if (response.IsSuccessStatusCode)
             {
-                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    var value = await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken).ConfigureAwait(false);
+                    return value != null
+                        ? ApiResult<T>.Success(value)
+                        : ApiResult<T>.Failure(HttpStatusCode.BadGateway, "Paperless returned an empty response body");
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogError(ex, "GET response deserialization failed: {Url}", url);
+                    return ApiResult<T>.Failure(
+                        HttpStatusCode.BadGateway,
+                        "Paperless returned an incompatible JSON response");
+                }
             }
 
-            await CreateApiError(response, "GET", url).ConfigureAwait(false);
-            return default;
+            var error = await CreateApiError(response, "GET", url).ConfigureAwait(false);
+            return ApiResult<T>.Failure(error);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GET request failed: {Url}", url);
-            return default;
+            return ApiResult<T>.Failure(HttpStatusCode.InternalServerError, ex.Message);
         }
     }
 

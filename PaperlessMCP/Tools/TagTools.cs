@@ -19,17 +19,18 @@ public static class TagTools
     public static async Task<string> List(
         PaperlessClient client,
         [Description("Page number (default: 1)")] int page = 1,
-        [Description("Page size (default: 25, max: 100)")] int pageSize = 25,
+        [Description("Page size (default: 25, capped by MAX_PAGE_SIZE)")] int pageSize = 25,
         [Description("Ordering field (e.g., 'name', '-document_count')")] string? ordering = null)
     {
-        var result = await client.GetTagsAsync(page, Math.Min(pageSize, 100), ordering).ConfigureAwait(false);
+        var effectivePageSize = client.GetEffectivePageSize(pageSize);
+        var result = await client.GetTagsAsync(page, effectivePageSize, ordering).ConfigureAwait(false);
 
         var response = McpResponse<object>.Success(
             result.Results,
             new McpMeta
             {
                 Page = page,
-                PageSize = pageSize,
+                PageSize = effectivePageSize,
                 Total = result.Count,
                 Next = result.Next,
                 PaperlessBaseUrl = client.BaseUrl
@@ -71,7 +72,8 @@ public static class TagTools
         [Description("Hex color (e.g., '#ff0000')")] string? color = null,
         [Description("Match pattern for auto-tagging")] string? match = null,
         [Description("Matching algorithm (0=None, 1=Any, 2=All, 3=Literal, 4=Regex, 5=Fuzzy, 6=Auto)")] int? matchingAlgorithm = null,
-        [Description("Is inbox tag")] bool? isInboxTag = null)
+        [Description("Is inbox tag")] bool? isInboxTag = null,
+        [Description("Parent tag ID for hierarchical tags (optional)")] int? parent = null)
     {
         var request = new TagCreateRequest
         {
@@ -79,7 +81,8 @@ public static class TagTools
             Color = color,
             Match = match,
             MatchingAlgorithm = matchingAlgorithm,
-            IsInboxTag = isInboxTag
+            IsInboxTag = isInboxTag,
+            Parent = parent
         };
 
         var result = await client.CreateTagWithResultAsync(request).ConfigureAwait(false);
@@ -112,15 +115,32 @@ public static class TagTools
         [Description("Hex color (e.g., '#ff0000', optional)")] string? color = null,
         [Description("Match pattern (optional)")] string? match = null,
         [Description("Matching algorithm (optional)")] int? matchingAlgorithm = null,
-        [Description("Is inbox tag (optional)")] bool? isInboxTag = null)
+        [Description("Is inbox tag (optional)")] bool? isInboxTag = null,
+        [Description("Parent tag ID. Omit to leave the parent unchanged.")] int? parent = null,
+        [Description("Set true to move the tag to the root level. Cannot be combined with parent.")] bool clearParent = false)
     {
+        if (parent.HasValue && clearParent)
+        {
+            var errorResponse = McpErrorResponse.Create(
+                ErrorCodes.Validation,
+                "parent and clear_parent cannot be used together",
+                meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
+            );
+            return JsonSerializer.Serialize(errorResponse);
+        }
+
         var request = new TagUpdateRequest
         {
             Name = name,
             Color = color,
             Match = match,
             MatchingAlgorithm = matchingAlgorithm,
-            IsInboxTag = isInboxTag
+            IsInboxTag = isInboxTag,
+            Parent = clearParent
+                ? TagParentUpdate.Clear
+                : parent.HasValue
+                    ? TagParentUpdate.Set(parent.Value)
+                    : default
         };
 
         var tag = await client.UpdateTagAsync(id, request).ConfigureAwait(false);
@@ -230,13 +250,13 @@ public static class TagTools
             return JsonSerializer.Serialize(dryRunResponse);
         }
 
-        var success = await client.BulkEditObjectsAsync(ids, "tags", "delete").ConfigureAwait(false);
+        var (success, bulkError) = await client.BulkEditObjectsAsync(ids, "tags", "delete").ConfigureAwait(false);
 
         if (!success)
         {
             var errorResponse = McpErrorResponse.Create(
                 ErrorCodes.UpstreamError,
-                "Bulk delete operation failed",
+                $"Bulk delete operation failed: {bulkError}",
                 meta: new McpMeta { PaperlessBaseUrl = client.BaseUrl }
             );
             return JsonSerializer.Serialize(errorResponse);
