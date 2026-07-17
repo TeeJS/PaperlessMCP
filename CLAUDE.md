@@ -65,19 +65,60 @@ Tests use xUnit with FluentAssertions for assertions, NSubstitute for mocking, a
 
 ## Versioning & Releases
 
-**Single source of truth: git tags (`vX.Y.Z`).** Everything else is derived from the tag at release time — never hand-edit a version anywhere.
+> **This fork does not use upstream's release automation.** `.woodpecker/` (`pr.yml`,
+> `release.yml`) is barryw's Woodpecker CI, inherited at fork time and **never run here** —
+> it pushes to barryw's GHCR namespace and creates releases on barryw's repo. This fork
+> releases through GitHub Actions in `.github/workflows/` only.
 
-**Releases are fully automated** by `.woodpecker/release.yml` on every push to `main`:
-1. `calculate-version` reads the latest tag and the conventional commits since it, then computes the next version (`feat` → minor, `fix`/`perf`/`refactor`/`build`/`ci`/`docs`/`style`/`test` → patch, `!`/`BREAKING CHANGE` → major, nothing → no release).
-2. The new version is injected into the NuGet package (`/p:Version`), the Docker image (`--build-arg VERSION` + `:vX.Y.Z`/`:latest`), `version.json`, and `PaperlessMCP.csproj` `<Version>` (the csproj literal is rewritten and committed so a local `dotnet build` reports the real version).
-3. A `chore(release): bump version to X.Y.Z [skip ci]` commit, a `vX.Y.Z` tag, and a GitHub release are created and pushed.
+**Version scheme: `<upstream version>-teejs.<n>`** (e.g. `0.3.2-teejs.1`), read as "barryw's
+0.3.2, plus our patch set, revision 1". Bump the suffix for our own changes; reset it on the
+next upstream sync (upstream 0.4.0 → `0.4.0-teejs.1`). This is the downstream-distribution
+convention (cf. Debian's `1.2.3-1ubuntu2`), and it exists because our code differs materially
+from upstream at the same version number — restricted tool surface, name-only writes,
+notes-stripping.
 
-Do **not** run `cog bump` — it is not part of the release flow and would fight the pipeline. The version comes from tags, not from any file.
+**Versions are hand-maintained. Nothing computes or bumps them.** To release:
 
-**Cocogitto's only job here is commit-message validation.** A `commit-msg` hook (and the `pr.yml` commitlint step) enforce Conventional Commits. Install the local hook after cloning:
-```bash
-cog install-hook commit-msg
-```
+1. Edit `version.json` and `<Version>` in `PaperlessMCP/PaperlessMCP.csproj` to match.
+2. Merge to `main`.
+3. Tag and push it **by name**:
+   ```bash
+   git tag -a v0.3.2-teejs.2 -m "Upstream base: barryw v0.3.2 / fork revision 2"
+   git push origin v0.3.2-teejs.2
+   ```
+
+**Never `git push --tags`.** All of barryw's tags (`v0.1.0`–`v0.3.2`) live in the local clone,
+inherited at fork time — this fork has cut exactly one of its own. `--tags` would push ~28 of
+upstream's tags into this repo. Always push tags by name.
+
+**What the workflows actually do:**
+
+- `docker.yml` — a push to `main` publishes `:latest` + `:sha-<short>`; pushing a `v*` tag
+  publishes the exact version (`:0.3.2-teejs.1`) + `:sha-<short>`; PRs build only, never push.
+  On non-tag builds the `VERSION` build-arg comes from `version.json`; on tag builds it comes
+  from the tag name. That build-arg reaches `dotnet publish /p:Version=`, so it sets the
+  **compiled assembly's** version. (The OCI `org.opencontainers.image.*` labels do *not* come
+  from the Dockerfile — docker/metadata-action's `--label` flags override them, so
+  `image.version` reads `latest` on main and `pr-N` on PRs.)
+- `test.yml` — runs `dotnet test` on pushes to `main`, `v*` tags, PRs targeting `main`, and
+  `workflow_dispatch`. **A push to a plain feature branch does not run it** — open a PR to get
+  the suite. `docker.yml` compiles only the main project, so a compile error in
+  `PaperlessMCP.Tests/` is invisible to it.
+
+**There is no floating `:0.3` tag, by design.** The `-teejs.N` suffix makes the version a semver
+prerelease, and docker/metadata-action deliberately skips `{{major}}.{{minor}}` for prereleases.
+Only the exact version is published. That's fine: `:latest` already covers "track the newest",
+and a pinned tag exists precisely so it does *not* move.
+
+**Do not use `cog` for versioning.** It is not installed on the dev machine and has never tagged
+this fork. It also *cannot* drive this scheme: semver sorts `0.3.2-teejs.1` **below** plain
+`0.3.2`, so `from_latest_tag = true` would resolve barryw's `v0.3.2` over our tags and never see
+them. `cog.toml` is inherited from upstream.
+
+**Conventional Commits are a convention here, not enforced.** No `commit-msg` hook is installed,
+and there is no commitlint step in `.github/workflows/`. Follow the format anyway — it keeps
+history readable and consistent with upstream's, which matters when reading commit messages to
+resolve sync conflicts.
 
 **Commit format:**
 ```
@@ -89,7 +130,3 @@ cog install-hook commit-msg
 ```
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
-
-```bash
-cog check                # Verify all commits follow conventional format
-```
