@@ -20,7 +20,7 @@ WORKDIR /app
 LABEL org.opencontainers.image.title="PaperlessMCP"
 LABEL org.opencontainers.image.description="Model Context Protocol server for Paperless-ngx"
 LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.source="https://github.com/barryw/PaperlessMCP"
+LABEL org.opencontainers.image.source="https://github.com/TeeJS/PaperlessMCP"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Copy published application
